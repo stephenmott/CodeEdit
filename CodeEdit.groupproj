@@ -1,0 +1,60 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{D3EFC672-0D3B-49DF-B086-4502B547F9C7}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="Packages\CodeEditVcl.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="Samples\VclDemo\CodeEditDemo.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="Samples\VclDemo\CodeEditDemo2.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="CodeEditVcl">
+        <MSBuild Projects="Packages\CodeEditVcl.dproj"/>
+    </Target>
+    <Target Name="CodeEditVcl:Clean">
+        <MSBuild Projects="Packages\CodeEditVcl.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="CodeEditVcl:Make">
+        <MSBuild Projects="Packages\CodeEditVcl.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="CodeEditDemo">
+        <MSBuild Projects="Samples\VclDemo\CodeEditDemo.dproj"/>
+    </Target>
+    <Target Name="CodeEditDemo:Clean">
+        <MSBuild Projects="Samples\VclDemo\CodeEditDemo.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="CodeEditDemo:Make">
+        <MSBuild Projects="Samples\VclDemo\CodeEditDemo.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="CodeEditDemo2">
+        <MSBuild Projects="Samples\VclDemo\CodeEditDemo2.dproj"/>
+    </Target>
+    <Target Name="CodeEditDemo2:Clean">
+        <MSBuild Projects="Samples\VclDemo\CodeEditDemo2.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="CodeEditDemo2:Make">
+        <MSBuild Projects="Samples\VclDemo\CodeEditDemo2.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="CodeEditVcl;CodeEditDemo;CodeEditDemo2"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="CodeEditVcl:Clean;CodeEditDemo:Clean;CodeEditDemo2:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="CodeEditVcl:Make;CodeEditDemo:Make;CodeEditDemo2:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

@@ -1,0 +1,36 @@
+# Delphi build outputs
+*.dcu
+*.dcuil
+*.dcp
+*.bpl
+*.exe
+*.dll
+*.map
+*.rsm
+*.tds
+*.local
+*.identcache
+*.stat
+*.otares
+
+# Delphi generated/history folders
+__history/
+__recovery/
+Win32/
+Win64/
+Android/
+iOSDevice64/
+OSX64/
+
+# Local build output
+Build/
+
+# IDE/user files
+*.dproj.local
+*.groupproj.local
+*.skincfg
+
+# Logs/temp
+*.log
+*.tmp
+~$*
