@@ -7,7 +7,9 @@ uses
   System.Generics.Collections,
   System.Types,
   System.UITypes,
+  Vcl.Buttons,
   Vcl.Controls,
+  Vcl.ExtCtrls,
   Vcl.Forms,
   Vcl.Graphics,
   Vcl.StdCtrls,
@@ -97,6 +99,12 @@ type
 
   TCodeUndoGroupKind = (ugNone, ugTyping);
 
+  TCodeSearchMatch = record
+    Line: Integer;
+    Column: Integer;
+    Length: Integer;
+  end;
+
   TCodeEditor = class(TCustomControl)
   private
     FLines: TStringList;
@@ -118,6 +126,26 @@ type
     FCompletionList: TListBox;
     FCompletionItems: TCodeCompletionItems;
     FCompletionStart: TCodePosition;
+    FSearchPanel: TPanel;
+    FSearchExpandButton: TSpeedButton;
+    FSearchEdit: TEdit;
+    FReplaceEdit: TEdit;
+    FSearchStatusLabel: TLabel;
+    FSearchPrevButton: TSpeedButton;
+    FSearchNextButton: TSpeedButton;
+    FSearchCloseButton: TSpeedButton;
+    FSearchReplaceButton: TSpeedButton;
+    FSearchReplaceAllButton: TSpeedButton;
+    FSearchMatchCaseButton: TSpeedButton;
+    FSearchWholeWordButton: TSpeedButton;
+    FSearchRegexButton: TSpeedButton;
+    FSearchMatches: TList<TCodeSearchMatch>;
+    FSearchIndex: Integer;
+    FSearchExpanded: Boolean;
+    FStyledScrollBars: Boolean;
+    FScrollBarDragging: Boolean;
+    FHScrollBarDragging: Boolean;
+    FScrollDragOffset: Integer;
     FSuppressKeyPress: Boolean;
     FApplyingUndo: Boolean;
     FActiveUndoItem: TCodeUndoItem;
@@ -134,12 +162,20 @@ type
     procedure SetLines(Value: TStrings);
     procedure SetOptions(Value: TCodeEditorOptions);
     procedure SetScrollBars(Value: System.UITypes.TScrollStyle);
+    procedure SetStyledScrollBars(Value: Boolean);
     procedure SetTheme(Value: TCodeEditorThemeColors);
     procedure SetThemeMode(Value: TCodeEditorThemeMode);
     procedure ResolveTheme(Colors: TCodeEditorThemeColors);
     function ActiveTheme: TCodeEditorThemeColors;
     function GetLines: TStrings;
     function ClientTextRect: TRect;
+    function StyledVerticalScrollRect: TRect;
+    function StyledVerticalThumbRect: TRect;
+    function StyledHorizontalScrollRect: TRect;
+    function StyledHorizontalThumbRect: TRect;
+    function MaxLineLength: Integer;
+    function StyledHorizontalVisible: Boolean;
+    function StyledVerticalVisible: Boolean;
     function VisibleLineCount: Integer;
     function VisibleColumnCount: Integer;
     function CaretToPoint(const Position: TCodePosition): TPoint;
@@ -156,6 +192,8 @@ type
     function CompletionPrefix: string;
     function CompletionVisible: Boolean;
     function CompletionDisplayText(Item: TCodeCompletionItem): string;
+    function SearchVisible: Boolean;
+    function IsWholeWordMatch(const LineText: string; Column, MatchLength: Integer): Boolean;
     function CaptureUndoState: TCodeUndoItem;
     function CurrentTextSnapshot: string;
     function CanUndo: Boolean;
@@ -176,6 +214,25 @@ type
     procedure CompletionListClick(Sender: TObject);
     procedure CompletionListDblClick(Sender: TObject);
     procedure MoveCompletionSelection(Delta: Integer);
+    procedure CreateSearchPanel;
+    procedure SetSearchButtonGlyph(Button: TSpeedButton; const Kind: string);
+    procedure StyleSearchEdit(Edit: TEdit);
+    procedure StyleSearchButton(Button: TSpeedButton);
+    procedure LayoutSearchPanel;
+    procedure UpdateSearch;
+    procedure SelectSearchMatch(Index: Integer);
+    procedure FindNextMatch;
+    procedure FindPreviousMatch;
+    procedure ReplaceCurrentMatch;
+    procedure ReplaceAllMatches;
+    procedure HideSearchPanel;
+    procedure SeedSearchFromSelection;
+    procedure SearchTextChanged(Sender: TObject);
+    procedure SearchEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure SearchEditKeyPress(Sender: TObject; var Key: Char);
+    procedure SearchButtonClick(Sender: TObject);
+    procedure SearchExpandClick(Sender: TObject);
+    procedure PaintSearchMatchesLine(ALineIndex, Y: Integer; const LineText: string);
     procedure SetSelectedText(const Value: string);
     procedure DeleteSelection;
     procedure EnsureCaretVisible;
@@ -183,9 +240,11 @@ type
     procedure UpdateMetrics;
     procedure UpdateScrollBars;
     procedure MoveCaret(const Position: TCodePosition; Shift: TShiftState);
+    procedure SelectWordAtCaret;
     procedure InsertText(const Value: string; AddUndo: Boolean = True);
     procedure PaintGutter;
     procedure PaintText;
+    procedure PaintStyledScrollBars;
     procedure PaintSelectionLine(ALineIndex, Y: Integer; const LineText: string);
     procedure PaintTokenText(const LineText: string; X, Y: Integer; ALineIndex: Integer);
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
@@ -205,6 +264,7 @@ type
     procedure KeyPress(var Key: Char); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
     procedure Resize; override;
     procedure Change; virtual;
@@ -217,6 +277,8 @@ type
     procedure Redo;
     procedure ClearUndo;
     procedure TriggerCompletion;
+    procedure ShowFind;
+    procedure ShowReplace;
     property CanUndoAction: Boolean read CanUndo;
     property CanRedoAction: Boolean read CanRedo;
     property Caret: TCodePosition read FCaret;
@@ -232,6 +294,7 @@ type
     property Options: TCodeEditorOptions read FOptions write SetOptions;
     property PopupMenu;
     property ScrollBars: System.UITypes.TScrollStyle read FScrollBars write SetScrollBars default ssBoth;
+    property StyledScrollBars: Boolean read FStyledScrollBars write SetStyledScrollBars default True;
     property Theme: TCodeEditorThemeColors read FTheme write SetTheme;
     property ThemeMode: TCodeEditorThemeMode read FThemeMode write SetThemeMode default ctmVclStyle;
     property MaxUndo: Integer read FMaxUndo write FMaxUndo default 1024;
@@ -256,6 +319,7 @@ implementation
 uses
   System.Character,
   System.Math,
+  System.RegularExpressions,
   System.SysUtils,
   Vcl.Clipbrd,
   Vcl.Themes;
@@ -442,6 +506,7 @@ constructor TCodeEditor.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csOpaque, csCaptureMouse, csClickEvents, csDoubleClicks];
+  DoubleBuffered := True;
   Width := 640;
   Height := 420;
   Color := clWindow;
@@ -459,8 +524,11 @@ begin
   FLines.Add('');
 
   FScrollBars := ssBoth;
+  FStyledScrollBars := True;
   FUndoStack := TStack<TCodeUndoItem>.Create;
   FRedoStack := TStack<TCodeUndoItem>.Create;
+  FSearchMatches := TList<TCodeSearchMatch>.Create;
+  FSearchIndex := -1;
   FMaxUndo := 1024;
   FCaret := TCodePosition.Create(0, 0);
   FAnchor := FCaret;
@@ -476,6 +544,7 @@ destructor TCodeEditor.Destroy;
 begin
   HideCompletion;
   FCompletionItems.Free;
+  FSearchMatches.Free;
   FinishUndoGroup;
   ClearUndo;
   FRedoStack.Free;
@@ -489,10 +558,10 @@ end;
 procedure TCodeEditor.CreateParams(var Params: TCreateParams);
 begin
   inherited;
-  Params.Style := Params.Style or WS_TABSTOP;
-  if FScrollBars in [ssHorizontal, ssBoth] then
+  Params.Style := Params.Style or WS_TABSTOP or WS_CLIPCHILDREN;
+  if (not FStyledScrollBars) and (FScrollBars in [ssHorizontal, ssBoth]) then
     Params.Style := Params.Style or WS_HSCROLL;
-  if FScrollBars in [ssVertical, ssBoth] then
+  if (not FStyledScrollBars) and (FScrollBars in [ssVertical, ssBoth]) then
     Params.Style := Params.Style or WS_VSCROLL;
 end;
 
@@ -534,23 +603,22 @@ end;
 
 procedure TCodeEditor.WMHScroll(var Message: TWMHScroll);
 var
-  MaxLineLength: Integer;
-  Line: string;
+  NewLeft: Integer;
 begin
   inherited;
-  MaxLineLength := 0;
-  for Line in FLines do
-    MaxLineLength := Max(MaxLineLength, Length(Line));
-
+  NewLeft := FLeftColumn;
   case Message.ScrollCode of
-    SB_LINELEFT: Dec(FLeftColumn);
-    SB_LINERIGHT: Inc(FLeftColumn);
-    SB_PAGELEFT: Dec(FLeftColumn, VisibleColumnCount);
-    SB_PAGERIGHT: Inc(FLeftColumn, VisibleColumnCount);
-    SB_THUMBPOSITION, SB_THUMBTRACK: FLeftColumn := Message.Pos;
+    SB_LINELEFT: Dec(NewLeft);
+    SB_LINERIGHT: Inc(NewLeft);
+    SB_PAGELEFT: Dec(NewLeft, VisibleColumnCount);
+    SB_PAGERIGHT: Inc(NewLeft, VisibleColumnCount);
+    SB_THUMBPOSITION, SB_THUMBTRACK: NewLeft := Message.Pos;
   end;
 
-  FLeftColumn := EnsureRange(FLeftColumn, 0, Max(0, MaxLineLength - VisibleColumnCount + 1));
+  NewLeft := EnsureRange(NewLeft, 0, Max(0, MaxLineLength - VisibleColumnCount + 1));
+  if NewLeft = FLeftColumn then
+    Exit;
+  FLeftColumn := NewLeft;
   UpdateScrollBars;
   UpdateCaret;
   Invalidate;
@@ -559,6 +627,7 @@ end;
 procedure TCodeEditor.Resize;
 begin
   inherited;
+  LayoutSearchPanel;
   UpdateScrollBars;
   EnsureCaretVisible;
 end;
@@ -584,25 +653,35 @@ end;
 procedure TCodeEditor.WMMouseWheel(var Message: TWMMouseWheel);
 var
   DeltaLines: Integer;
+  NewTop: Integer;
 begin
   DeltaLines := Mouse.WheelScrollLines * -Sign(Message.WheelDelta);
-  FTopLine := EnsureRange(FTopLine + DeltaLines, 0, Max(0, FLines.Count - VisibleLineCount));
+  NewTop := EnsureRange(FTopLine + DeltaLines, 0, Max(0, FLines.Count - VisibleLineCount));
+  if NewTop = FTopLine then
+    Exit;
+  FTopLine := NewTop;
   UpdateScrollBars;
   Invalidate;
 end;
 
 procedure TCodeEditor.WMVScroll(var Message: TWMVScroll);
+var
+  NewTop: Integer;
 begin
   inherited;
+  NewTop := FTopLine;
   case Message.ScrollCode of
-    SB_LINEUP: Dec(FTopLine);
-    SB_LINEDOWN: Inc(FTopLine);
-    SB_PAGEUP: Dec(FTopLine, VisibleLineCount);
-    SB_PAGEDOWN: Inc(FTopLine, VisibleLineCount);
-    SB_THUMBPOSITION, SB_THUMBTRACK: FTopLine := Message.Pos;
+    SB_LINEUP: Dec(NewTop);
+    SB_LINEDOWN: Inc(NewTop);
+    SB_PAGEUP: Dec(NewTop, VisibleLineCount);
+    SB_PAGEDOWN: Inc(NewTop, VisibleLineCount);
+    SB_THUMBPOSITION, SB_THUMBTRACK: NewTop := Message.Pos;
   end;
 
-  FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
+  NewTop := EnsureRange(NewTop, 0, Max(0, FLines.Count - VisibleLineCount));
+  if NewTop = FTopLine then
+    Exit;
+  FTopLine := NewTop;
   UpdateScrollBars;
   UpdateCaret;
   Invalidate;
@@ -642,6 +721,13 @@ var
 begin
   if not HandleAllocated then
     Exit;
+
+  if FStyledScrollBars then
+  begin
+    ShowScrollBar(Handle, SB_VERT, False);
+    ShowScrollBar(Handle, SB_HORZ, False);
+    Exit;
+  end;
 
   MaxLineLength := 0;
   for Line in FLines do
@@ -686,11 +772,97 @@ function TCodeEditor.ClientTextRect: TRect;
 begin
   Result := ClientRect;
   Inc(Result.Left, FGutterWidth + 4);
+  if StyledVerticalVisible then
+    Dec(Result.Right, 12);
+  if StyledHorizontalVisible then
+    Dec(Result.Bottom, 12);
+end;
+
+function TCodeEditor.StyledVerticalVisible: Boolean;
+begin
+  Result := FStyledScrollBars and (FScrollBars in [ssVertical, ssBoth]);
+end;
+
+function TCodeEditor.StyledHorizontalVisible: Boolean;
+begin
+  Result := FStyledScrollBars and (FScrollBars in [ssHorizontal, ssBoth]);
+end;
+
+function TCodeEditor.MaxLineLength: Integer;
+var
+  Line: string;
+begin
+  Result := 0;
+  for Line in FLines do
+    if Length(Line) > Result then
+      Result := Length(Line);
+end;
+
+function TCodeEditor.StyledVerticalScrollRect: TRect;
+var
+  BottomReserve: Integer;
+begin
+  BottomReserve := 0;
+  if StyledHorizontalVisible then
+    BottomReserve := 12;
+  Result := Rect(ClientWidth - 12, 0, ClientWidth, ClientHeight - BottomReserve);
+end;
+
+function TCodeEditor.StyledVerticalThumbRect: TRect;
+var
+  Track: TRect;
+  ThumbHeight: Integer;
+  MaxTopLine: Integer;
+  Travel: Integer;
+begin
+  Track := StyledVerticalScrollRect;
+  if FLines.Count <= VisibleLineCount then
+    Exit(Rect(Track.Left, Track.Top, Track.Right, Track.Top));
+
+  ThumbHeight := Max(24, MulDiv(Track.Height, VisibleLineCount, FLines.Count));
+  MaxTopLine := Max(1, FLines.Count - VisibleLineCount);
+  Travel := Max(1, Track.Height - ThumbHeight);
+  Result.Top := Track.Top + MulDiv(FTopLine, Travel, MaxTopLine);
+  Result.Bottom := Result.Top + ThumbHeight;
+  Result.Left := Track.Left;
+  Result.Right := Track.Right;
+end;
+
+function TCodeEditor.StyledHorizontalScrollRect: TRect;
+var
+  RightReserve: Integer;
+begin
+  RightReserve := 0;
+  if StyledVerticalVisible then
+    RightReserve := 12;
+  Result := Rect(0, ClientHeight - 12, ClientWidth - RightReserve, ClientHeight);
+end;
+
+function TCodeEditor.StyledHorizontalThumbRect: TRect;
+var
+  Track: TRect;
+  ThumbWidth: Integer;
+  MaxLeftCol: Integer;
+  Travel: Integer;
+  TotalCols: Integer;
+begin
+  Track := StyledHorizontalScrollRect;
+  TotalCols := MaxLineLength;
+  if TotalCols <= VisibleColumnCount then
+    Exit(Rect(Track.Left, Track.Top, Track.Left, Track.Bottom));
+
+  ThumbWidth := Max(24, MulDiv(Track.Width, VisibleColumnCount, TotalCols));
+  MaxLeftCol := Max(1, TotalCols - VisibleColumnCount);
+  Travel := Max(1, Track.Width - ThumbWidth);
+  Result.Left := Track.Left + MulDiv(FLeftColumn, Travel, MaxLeftCol);
+  Result.Right := Result.Left + ThumbWidth;
+  Result.Top := Track.Top;
+  Result.Bottom := Track.Bottom;
 end;
 
 function TCodeEditor.VisibleLineCount: Integer;
 begin
-  Result := Max(1, ClientHeight div FLineHeight);
+  Result := Max(1, ClientTextRect.Height div FLineHeight);
 end;
 
 function TCodeEditor.VisibleColumnCount: Integer;
@@ -729,6 +901,18 @@ var
 begin
   RGBColor := ColorToRGB(Color);
   Result := (GetRValue(RGBColor) * 299 + GetGValue(RGBColor) * 587 + GetBValue(RGBColor) * 114) div 1000;
+end;
+
+function ShiftBrightness(Color: TColor; Delta: Integer): TColor;
+var
+  RGBColor: TColorRef;
+  R, G, B: Integer;
+begin
+  RGBColor := ColorToRGB(Color);
+  R := EnsureRange(GetRValue(RGBColor) + Delta, 0, 255);
+  G := EnsureRange(GetGValue(RGBColor) + Delta, 0, 255);
+  B := EnsureRange(GetBValue(RGBColor) + Delta, 0, 255);
+  Result := TColor(RGB(R, G, B));
 end;
 
 function TCodeEditor.IsDarkTheme(const Colors: TCodeEditorThemeColors): Boolean;
@@ -853,6 +1037,32 @@ begin
   Result := Item.Caption;
   if Item.Detail <> '' then
     Result := Result + '    ' + Item.Detail;
+end;
+
+function TCodeEditor.SearchVisible: Boolean;
+begin
+  Result := Assigned(FSearchPanel) and FSearchPanel.Visible;
+end;
+
+function TCodeEditor.IsWholeWordMatch(const LineText: string; Column, MatchLength: Integer): Boolean;
+var
+  BeforeChar: Char;
+  AfterChar: Char;
+
+  function IsWordChar(Ch: Char): Boolean;
+  begin
+    Result := Ch.IsLetterOrDigit or (Ch = '_');
+  end;
+
+begin
+  BeforeChar := #0;
+  AfterChar := #0;
+  if Column > 0 then
+    BeforeChar := LineText[Column];
+  if Column + MatchLength + 1 <= Length(LineText) then
+    AfterChar := LineText[Column + MatchLength + 1];
+
+  Result := not IsWordChar(BeforeChar) and not IsWordChar(AfterChar);
 end;
 
 function TCodeEditor.CurrentTextSnapshot: string;
@@ -1160,6 +1370,490 @@ begin
   ShowCompletion(#0, True);
 end;
 
+procedure TCodeEditor.CreateSearchPanel;
+
+  function NewButton(const CaptionText, HintText: string; WidthValue: Integer): TSpeedButton;
+  begin
+    Result := TSpeedButton.Create(FSearchPanel);
+    Result.Parent := FSearchPanel;
+    Result.Caption := CaptionText;
+    Result.Hint := HintText;
+    Result.ShowHint := True;
+    Result.Width := WidthValue;
+    Result.Height := 28;
+    Result.Flat := True;
+    StyleSearchButton(Result);
+    Result.OnClick := SearchButtonClick;
+  end;
+
+begin
+  if Assigned(FSearchPanel) then
+    Exit;
+
+  FSearchPanel := TPanel.Create(Self);
+  FSearchPanel.Parent := Self;
+  FSearchPanel.BevelOuter := bvRaised;
+  FSearchPanel.ParentBackground := False;
+  FSearchPanel.Color := $00303030;
+  FSearchPanel.StyleElements := [];
+  FSearchPanel.Visible := False;
+  FSearchPanel.Width := 760;
+  FSearchPanel.Height := 36;
+
+  FSearchExpandButton := NewButton('>', 'Show replace', 28);
+  FSearchExpandButton.OnClick := SearchExpandClick;
+  SetSearchButtonGlyph(FSearchExpandButton, 'expand');
+
+  FSearchEdit := TEdit.Create(FSearchPanel);
+  FSearchEdit.Parent := FSearchPanel;
+  StyleSearchEdit(FSearchEdit);
+  FSearchEdit.TextHint := 'Find';
+  FSearchEdit.OnChange := SearchTextChanged;
+  FSearchEdit.OnKeyDown := SearchEditKeyDown;
+  FSearchEdit.OnKeyPress := SearchEditKeyPress;
+
+  FReplaceEdit := TEdit.Create(FSearchPanel);
+  FReplaceEdit.Parent := FSearchPanel;
+  StyleSearchEdit(FReplaceEdit);
+  FReplaceEdit.TextHint := 'Replace';
+  FReplaceEdit.Visible := False;
+  FReplaceEdit.OnKeyDown := SearchEditKeyDown;
+  FReplaceEdit.OnKeyPress := SearchEditKeyPress;
+
+  FSearchMatchCaseButton := NewButton('Aa', 'Match case', 34);
+  FSearchMatchCaseButton.GroupIndex := 10;
+  FSearchMatchCaseButton.AllowAllUp := True;
+
+  FSearchWholeWordButton := NewButton('ab', 'Match whole word', 34);
+  FSearchWholeWordButton.GroupIndex := 11;
+  FSearchWholeWordButton.AllowAllUp := True;
+
+  FSearchRegexButton := NewButton('.*', 'Use regular expression', 34);
+  FSearchRegexButton.GroupIndex := 12;
+  FSearchRegexButton.AllowAllUp := True;
+
+  FSearchStatusLabel := TLabel.Create(FSearchPanel);
+  FSearchStatusLabel.Parent := FSearchPanel;
+  FSearchStatusLabel.AutoSize := False;
+  FSearchStatusLabel.Alignment := taCenter;
+  FSearchStatusLabel.Layout := tlCenter;
+  FSearchStatusLabel.Font.Color := clWhite;
+  FSearchStatusLabel.Font.Name := 'Segoe UI';
+  FSearchStatusLabel.Font.Size := 11;
+  FSearchStatusLabel.StyleElements := [];
+  FSearchStatusLabel.Caption := 'No results';
+
+  FSearchPrevButton := NewButton('', 'Previous match', 30);
+  SetSearchButtonGlyph(FSearchPrevButton, 'prev');
+  FSearchNextButton := NewButton('', 'Next match', 30);
+  SetSearchButtonGlyph(FSearchNextButton, 'next');
+  FSearchReplaceButton := NewButton('AB', 'Replace', 34);
+  FSearchReplaceButton.Visible := False;
+  FSearchReplaceAllButton := NewButton('All', 'Replace all', 42);
+  FSearchReplaceAllButton.Visible := False;
+  FSearchCloseButton := NewButton('', 'Close', 30);
+  SetSearchButtonGlyph(FSearchCloseButton, 'close');
+
+  LayoutSearchPanel;
+end;
+
+procedure TCodeEditor.SetSearchButtonGlyph(Button: TSpeedButton; const Kind: string);
+var
+  Bmp: Vcl.Graphics.TBitmap;
+begin
+  Bmp := Vcl.Graphics.TBitmap.Create;
+  try
+    Bmp.SetSize(16, 16);
+    Bmp.Canvas.Brush.Color := clFuchsia;
+    Bmp.Canvas.FillRect(Rect(0, 0, 16, 16));
+    Bmp.Transparent := True;
+    Bmp.TransparentColor := clFuchsia;
+    Bmp.Canvas.Pen.Color := clWhite;
+    Bmp.Canvas.Pen.Width := 2;
+
+    if Kind = 'expand' then
+    begin
+      Bmp.Canvas.MoveTo(4, 6);
+      Bmp.Canvas.LineTo(8, 10);
+      Bmp.Canvas.LineTo(12, 6);
+    end
+    else if Kind = 'collapse' then
+    begin
+      Bmp.Canvas.MoveTo(4, 10);
+      Bmp.Canvas.LineTo(8, 6);
+      Bmp.Canvas.LineTo(12, 10);
+    end
+    else if Kind = 'prev' then
+    begin
+      Bmp.Canvas.MoveTo(8, 3);
+      Bmp.Canvas.LineTo(8, 13);
+      Bmp.Canvas.MoveTo(4, 7);
+      Bmp.Canvas.LineTo(8, 3);
+      Bmp.Canvas.LineTo(12, 7);
+    end
+    else if Kind = 'next' then
+    begin
+      Bmp.Canvas.MoveTo(8, 3);
+      Bmp.Canvas.LineTo(8, 13);
+      Bmp.Canvas.MoveTo(4, 9);
+      Bmp.Canvas.LineTo(8, 13);
+      Bmp.Canvas.LineTo(12, 9);
+    end
+    else if Kind = 'close' then
+    begin
+      Bmp.Canvas.MoveTo(4, 4);
+      Bmp.Canvas.LineTo(12, 12);
+      Bmp.Canvas.MoveTo(12, 4);
+      Bmp.Canvas.LineTo(4, 12);
+    end;
+
+    Button.Caption := '';
+    Button.Glyph.Assign(Bmp);
+    Button.NumGlyphs := 1;
+    StyleSearchButton(Button);
+  finally
+    Bmp.Free;
+  end;
+end;
+
+procedure TCodeEditor.StyleSearchEdit(Edit: TEdit);
+begin
+  Edit.AutoSize := False;
+  Edit.ParentColor := False;
+  Edit.Color := $00252525;
+  Edit.StyleElements := [];
+  Edit.Font.Name := 'Segoe UI';
+  Edit.Font.Size := 11;
+  Edit.Font.Color := clWhite;
+  Edit.BorderStyle := bsSingle;
+  Edit.Ctl3D := False;
+end;
+
+procedure TCodeEditor.StyleSearchButton(Button: TSpeedButton);
+begin
+  Button.Flat := True;
+  Button.Transparent := False;
+  Button.StyleElements := [];
+  Button.Font.Name := 'Segoe UI';
+  Button.Font.Size := 11;
+  Button.Font.Color := clWhite;
+end;
+
+procedure TCodeEditor.LayoutSearchPanel;
+var
+  X: Integer;
+  TopOffset: Integer;
+  PanelWidth: Integer;
+  EditWidth: Integer;
+  ButtonTop: Integer;
+begin
+  if not Assigned(FSearchPanel) then
+    Exit;
+
+  PanelWidth := EnsureRange(ClientWidth - 28, 520, 760);
+  FSearchPanel.Width := PanelWidth;
+  FSearchPanel.Height := IfThen(FSearchExpanded, 96, 54);
+  FSearchPanel.Left := Max(4, ClientWidth - FSearchPanel.Width - 14);
+  FSearchPanel.Top := 8;
+
+  TopOffset := 10;
+  ButtonTop := TopOffset;
+  X := 8;
+  FSearchExpandButton.SetBounds(X, ButtonTop, 34, 34);
+  FSearchExpandButton.Caption := '';
+  Inc(X, 40);
+
+  EditWidth := Max(180, PanelWidth - 450);
+  FSearchEdit.SetBounds(X, TopOffset, EditWidth, 34);
+  FReplaceEdit.SetBounds(X, TopOffset + 42, EditWidth, 34);
+  Inc(X, EditWidth + 10);
+
+  FSearchMatchCaseButton.SetBounds(X, ButtonTop, 40, 34);
+  Inc(X, 38);
+  FSearchWholeWordButton.SetBounds(X, ButtonTop, 40, 34);
+  Inc(X, 38);
+  FSearchRegexButton.SetBounds(X, ButtonTop, 40, 34);
+  Inc(X, 44);
+
+  FSearchStatusLabel.SetBounds(X, TopOffset, 128, 34);
+  Inc(X, 124);
+  FSearchPrevButton.SetBounds(X, ButtonTop, 36, 34);
+  FSearchPrevButton.Caption := '';
+  Inc(X, 34);
+  FSearchNextButton.SetBounds(X, ButtonTop, 36, 34);
+  FSearchNextButton.Caption := '';
+  Inc(X, 38);
+  FSearchCloseButton.SetBounds(X, ButtonTop, 36, 34);
+  FSearchCloseButton.Caption := '';
+
+  FSearchReplaceButton.SetBounds(FReplaceEdit.Left + FReplaceEdit.Width + 10, TopOffset + 42, 44, 34);
+  FSearchReplaceAllButton.SetBounds(FSearchReplaceButton.Left + 48, TopOffset + 42, 62, 34);
+
+  FReplaceEdit.Visible := FSearchExpanded;
+  FSearchReplaceButton.Visible := FSearchExpanded;
+  FSearchReplaceAllButton.Visible := FSearchExpanded;
+  if FSearchExpanded then
+  begin
+    SetSearchButtonGlyph(FSearchExpandButton, 'collapse');
+  end
+  else
+  begin
+    SetSearchButtonGlyph(FSearchExpandButton, 'expand');
+  end;
+end;
+
+procedure TCodeEditor.UpdateSearch;
+var
+  LineIndex: Integer;
+  SourceLine: string;
+  SearchText: string;
+  FoundAt: Integer;
+  Offset: Integer;
+  Options: TRegExOptions;
+  Matches: TMatchCollection;
+  Match: TMatch;
+  SearchMatch: TCodeSearchMatch;
+begin
+  if not Assigned(FSearchMatches) then
+    Exit;
+
+  FSearchMatches.Clear;
+  FSearchIndex := -1;
+  SearchText := FSearchEdit.Text;
+  if SearchText = '' then
+  begin
+    FSearchStatusLabel.Caption := 'No results';
+    Invalidate;
+    Exit;
+  end;
+
+  for LineIndex := 0 to FLines.Count - 1 do
+  begin
+    SourceLine := FLines[LineIndex];
+    if FSearchRegexButton.Down then
+    begin
+      Options := [];
+      if not FSearchMatchCaseButton.Down then
+        Include(Options, roIgnoreCase);
+      try
+        Matches := TRegEx.Matches(SourceLine, SearchText, Options);
+        for Match in Matches do
+          if Match.Length > 0 then
+          begin
+            if FSearchWholeWordButton.Down and not IsWholeWordMatch(SourceLine, Match.Index, Match.Length) then
+              Continue;
+            SearchMatch.Line := LineIndex;
+            SearchMatch.Column := Match.Index;
+            SearchMatch.Length := Match.Length;
+            FSearchMatches.Add(SearchMatch);
+          end;
+      except
+        FSearchStatusLabel.Caption := 'Invalid regex';
+        Invalidate;
+        Exit;
+      end;
+    end
+    else
+    begin
+      Offset := 1;
+      repeat
+        if FSearchMatchCaseButton.Down then
+          FoundAt := Pos(SearchText, Copy(SourceLine, Offset, MaxInt))
+        else
+          FoundAt := Pos(LowerCase(SearchText), LowerCase(Copy(SourceLine, Offset, MaxInt)));
+        if FoundAt = 0 then
+          Break;
+        Inc(FoundAt, Offset - 1);
+        if not FSearchWholeWordButton.Down or IsWholeWordMatch(SourceLine, FoundAt - 1, Length(SearchText)) then
+        begin
+          SearchMatch.Line := LineIndex;
+          SearchMatch.Column := FoundAt - 1;
+          SearchMatch.Length := Length(SearchText);
+          FSearchMatches.Add(SearchMatch);
+        end;
+        Offset := FoundAt + Max(1, Length(SearchText));
+      until Offset > Length(SourceLine);
+    end;
+  end;
+
+  if FSearchMatches.Count = 0 then
+    FSearchStatusLabel.Caption := 'No results'
+  else
+  begin
+    FSearchIndex := 0;
+    FSearchStatusLabel.Caption := Format('%d of %d', [FSearchIndex + 1, FSearchMatches.Count]);
+  end;
+  Invalidate;
+end;
+
+procedure TCodeEditor.SelectSearchMatch(Index: Integer);
+var
+  Match: TCodeSearchMatch;
+begin
+  if (Index < 0) or (Index >= FSearchMatches.Count) then
+    Exit;
+
+  FSearchIndex := Index;
+  Match := FSearchMatches[FSearchIndex];
+  FAnchor := TCodePosition.Create(Match.Line, Match.Column);
+  FCaret := TCodePosition.Create(Match.Line, Match.Column + Match.Length);
+  EnsureCaretVisible;
+  FSearchStatusLabel.Caption := Format('%d of %d', [FSearchIndex + 1, FSearchMatches.Count]);
+  Invalidate;
+end;
+
+procedure TCodeEditor.FindNextMatch;
+begin
+  if FSearchMatches.Count = 0 then
+    Exit;
+  SelectSearchMatch((FSearchIndex + 1) mod FSearchMatches.Count);
+end;
+
+procedure TCodeEditor.FindPreviousMatch;
+begin
+  if FSearchMatches.Count = 0 then
+    Exit;
+  SelectSearchMatch((FSearchIndex + FSearchMatches.Count - 1) mod FSearchMatches.Count);
+end;
+
+procedure TCodeEditor.ReplaceCurrentMatch;
+begin
+  if FSearchMatches.Count = 0 then
+    Exit;
+
+  SelectSearchMatch(FSearchIndex);
+  SelectedText := FReplaceEdit.Text;
+  UpdateSearch;
+end;
+
+procedure TCodeEditor.ReplaceAllMatches;
+var
+  UndoItem: TCodeUndoItem;
+  I: Integer;
+  Match: TCodeSearchMatch;
+  LineText: string;
+begin
+  if FSearchMatches.Count = 0 then
+    Exit;
+
+  FinishUndoGroup;
+  UndoItem := CaptureUndoState;
+  for I := FSearchMatches.Count - 1 downto 0 do
+  begin
+    Match := FSearchMatches[I];
+    LineText := FLines[Match.Line];
+    Delete(LineText, Match.Column + 1, Match.Length);
+    Insert(FReplaceEdit.Text, LineText, Match.Column + 1);
+    FLines[Match.Line] := LineText;
+  end;
+  CommitUndoState(UndoItem);
+  UpdateSearch;
+  LinesChanged(Self);
+end;
+
+procedure TCodeEditor.HideSearchPanel;
+begin
+  if Assigned(FSearchPanel) then
+    FSearchPanel.Hide;
+  if Assigned(FSearchMatches) then
+    FSearchMatches.Clear;
+  FSearchIndex := -1;
+  Invalidate;
+  SetFocus;
+end;
+
+procedure TCodeEditor.SearchTextChanged(Sender: TObject);
+begin
+  UpdateSearch;
+end;
+
+procedure TCodeEditor.SearchEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  case Key of
+    VK_ESCAPE:
+      begin
+        HideSearchPanel;
+        Key := 0;
+      end;
+    VK_RETURN:
+      begin
+        if Sender = FReplaceEdit then
+          ReplaceCurrentMatch
+        else if ssShift in Shift then
+          FindPreviousMatch
+        else
+          FindNextMatch;
+        Key := 0;
+      end;
+  end;
+end;
+
+procedure TCodeEditor.SearchEditKeyPress(Sender: TObject; var Key: Char);
+begin
+  if (Key = #13) or (Key = #27) then
+    Key := #0;
+end;
+
+procedure TCodeEditor.SearchButtonClick(Sender: TObject);
+begin
+  if Sender = FSearchPrevButton then
+    FindPreviousMatch
+  else if Sender = FSearchNextButton then
+    FindNextMatch
+  else if Sender = FSearchCloseButton then
+    HideSearchPanel
+  else if Sender = FSearchReplaceButton then
+    ReplaceCurrentMatch
+  else if Sender = FSearchReplaceAllButton then
+    ReplaceAllMatches
+  else
+    UpdateSearch;
+end;
+
+procedure TCodeEditor.SearchExpandClick(Sender: TObject);
+begin
+  FSearchExpanded := not FSearchExpanded;
+  LayoutSearchPanel;
+end;
+
+procedure TCodeEditor.SeedSearchFromSelection;
+var
+  Seed: string;
+begin
+  if HasSelection and (SelectionStart.Line = SelectionEnd.Line) then
+  begin
+    Seed := GetSelectedText;
+    if (Seed <> '') and (FSearchEdit.Text <> Seed) then
+      FSearchEdit.Text := Seed;
+  end;
+end;
+
+procedure TCodeEditor.ShowFind;
+begin
+  CreateSearchPanel;
+  FSearchExpanded := False;
+  LayoutSearchPanel;
+  FSearchPanel.Show;
+  FSearchPanel.BringToFront;
+  SeedSearchFromSelection;
+  UpdateSearch;
+  FSearchEdit.SetFocus;
+  FSearchEdit.SelectAll;
+end;
+
+procedure TCodeEditor.ShowReplace;
+begin
+  CreateSearchPanel;
+  FSearchExpanded := True;
+  LayoutSearchPanel;
+  FSearchPanel.Show;
+  FSearchPanel.BringToFront;
+  SeedSearchFromSelection;
+  UpdateSearch;
+  FSearchEdit.SetFocus;
+  FSearchEdit.SelectAll;
+end;
+
 procedure TCodeEditor.SetSelectedText(const Value: string);
 var
   UndoItem: TCodeUndoItem;
@@ -1231,6 +1925,16 @@ begin
   begin
     FScrollBars := Value;
     RecreateWnd;
+  end;
+end;
+
+procedure TCodeEditor.SetStyledScrollBars(Value: Boolean);
+begin
+  if FStyledScrollBars <> Value then
+  begin
+    FStyledScrollBars := Value;
+    RecreateWnd;
+    Invalidate;
   end;
 end;
 
@@ -1532,6 +2236,18 @@ begin
         CommitUndoState(UndoItem);
         Key := 0;
       end;
+    Ord('F'):
+      if ssCtrl in Shift then
+      begin
+        ShowFind;
+        Key := 0;
+      end;
+    Ord('H'):
+      if ssCtrl in Shift then
+      begin
+        ShowReplace;
+        Key := 0;
+      end;
     Ord('V'):
       if ssCtrl in Shift then
       begin
@@ -1634,21 +2350,174 @@ begin
 end;
 
 procedure TCodeEditor.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  Thumb: TRect;
+  NewPos: Integer;
 begin
   inherited;
   if Button = mbLeft then
   begin
     SetFocus;
     HideCompletion;
+    if StyledVerticalVisible and PtInRect(StyledVerticalScrollRect, Point(X, Y)) then
+    begin
+      Thumb := StyledVerticalThumbRect;
+      if PtInRect(Thumb, Point(X, Y)) then
+      begin
+        FScrollBarDragging := True;
+        FScrollDragOffset := Y - Thumb.Top;
+      end
+      else
+      begin
+        if Y < Thumb.Top then
+          NewPos := FTopLine - VisibleLineCount
+        else
+          NewPos := FTopLine + VisibleLineCount;
+        NewPos := EnsureRange(NewPos, 0, Max(0, FLines.Count - VisibleLineCount));
+        if NewPos <> FTopLine then
+        begin
+          FTopLine := NewPos;
+          UpdateScrollBars;
+          Invalidate;
+        end;
+      end;
+      Exit;
+    end;
+    if StyledHorizontalVisible and PtInRect(StyledHorizontalScrollRect, Point(X, Y)) then
+    begin
+      Thumb := StyledHorizontalThumbRect;
+      if PtInRect(Thumb, Point(X, Y)) then
+      begin
+        FHScrollBarDragging := True;
+        FScrollDragOffset := X - Thumb.Left;
+      end
+      else
+      begin
+        if X < Thumb.Left then
+          NewPos := FLeftColumn - VisibleColumnCount
+        else
+          NewPos := FLeftColumn + VisibleColumnCount;
+        NewPos := EnsureRange(NewPos, 0, Max(0, MaxLineLength - VisibleColumnCount + 1));
+        if NewPos <> FLeftColumn then
+        begin
+          FLeftColumn := NewPos;
+          UpdateScrollBars;
+          Invalidate;
+        end;
+      end;
+      Exit;
+    end;
     MoveCaret(PointToCaret(Point(X, Y)), Shift);
+    if ssDouble in Shift then
+      SelectWordAtCaret;
   end;
 end;
 
 procedure TCodeEditor.MouseMove(Shift: TShiftState; X, Y: Integer);
+var
+  Track: TRect;
+  Thumb: TRect;
+  ThumbExtent: Integer;
+  Travel: Integer;
+  MaxTopLine: Integer;
+  MaxLeftCol: Integer;
+  NewPos: Integer;
 begin
   inherited;
+  if FScrollBarDragging then
+  begin
+    Track := StyledVerticalScrollRect;
+    Thumb := StyledVerticalThumbRect;
+    ThumbExtent := Thumb.Height;
+    Travel := Max(1, Track.Height - ThumbExtent);
+    MaxTopLine := Max(0, FLines.Count - VisibleLineCount);
+    NewPos := EnsureRange(Y - FScrollDragOffset - Track.Top, 0, Travel);
+    if MaxTopLine > 0 then
+      NewPos := MulDiv(NewPos, MaxTopLine, Travel)
+    else
+      NewPos := 0;
+    if NewPos <> FTopLine then
+    begin
+      FTopLine := NewPos;
+      UpdateScrollBars;
+      UpdateCaret;
+      Invalidate;
+    end;
+    Exit;
+  end;
+
+  if FHScrollBarDragging then
+  begin
+    Track := StyledHorizontalScrollRect;
+    Thumb := StyledHorizontalThumbRect;
+    ThumbExtent := Thumb.Width;
+    Travel := Max(1, Track.Width - ThumbExtent);
+    MaxLeftCol := Max(0, MaxLineLength - VisibleColumnCount + 1);
+    NewPos := EnsureRange(X - FScrollDragOffset - Track.Left, 0, Travel);
+    if MaxLeftCol > 0 then
+      NewPos := MulDiv(NewPos, MaxLeftCol, Travel)
+    else
+      NewPos := 0;
+    if NewPos <> FLeftColumn then
+    begin
+      FLeftColumn := NewPos;
+      UpdateScrollBars;
+      UpdateCaret;
+      Invalidate;
+    end;
+    Exit;
+  end;
+
   if ssLeft in Shift then
     MoveCaret(PointToCaret(Point(X, Y)), Shift + [ssShift]);
+end;
+
+procedure TCodeEditor.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  inherited;
+  FScrollBarDragging := False;
+  FHScrollBarDragging := False;
+end;
+
+procedure TCodeEditor.SelectWordAtCaret;
+
+  function IsWordChar(Ch: Char): Boolean;
+  begin
+    Result := Ch.IsLetterOrDigit or (Ch = '_');
+  end;
+
+var
+  LineText: string;
+  StartCol: Integer;
+  EndCol: Integer;
+begin
+  if (FCaret.Line < 0) or (FCaret.Line >= FLines.Count) then
+    Exit;
+
+  LineText := FLines[FCaret.Line];
+  StartCol := FCaret.Column;
+  EndCol := FCaret.Column;
+
+  if not ((StartCol < Length(LineText)) and IsWordChar(LineText[StartCol + 1])) then
+  begin
+    if (StartCol > 0) and IsWordChar(LineText[StartCol]) then
+    begin
+      Dec(StartCol);
+      Dec(EndCol);
+    end
+    else
+      Exit;
+  end;
+
+  while (StartCol > 0) and IsWordChar(LineText[StartCol]) do
+    Dec(StartCol);
+  while (EndCol < Length(LineText)) and IsWordChar(LineText[EndCol + 1]) do
+    Inc(EndCol);
+
+  FAnchor := TCodePosition.Create(FCaret.Line, StartCol);
+  FCaret := TCodePosition.Create(FCaret.Line, EndCol);
+  EnsureCaretVisible;
+  Invalidate;
 end;
 
 procedure TCodeEditor.Paint;
@@ -1663,6 +2532,7 @@ begin
     Canvas.Font.Color := ThemeColors.Text;
     PaintGutter;
     PaintText;
+    PaintStyledScrollBars;
   finally
     ThemeColors.Free;
   end;
@@ -1726,11 +2596,65 @@ begin
 
       Y := I * FLineHeight + 1;
       LineText := FLines[LineIndex];
+      PaintSearchMatchesLine(LineIndex, Y, LineText);
       PaintSelectionLine(LineIndex, Y, LineText);
       PaintTokenText(LineText, R.Left, Y, LineIndex);
     end;
   finally
     ThemeColors.Free;
+  end;
+end;
+
+procedure TCodeEditor.PaintStyledScrollBars;
+var
+  Track: TRect;
+  Thumb: TRect;
+  ThemeColors: TCodeEditorThemeColors;
+  TrackColor: TColor;
+  ThumbColor: TColor;
+begin
+  if not FStyledScrollBars then
+    Exit;
+
+  ThemeColors := ActiveTheme;
+  try
+    TrackColor := ThemeColors.GutterBackground;
+    if IsDarkTheme(ThemeColors) then
+      ThumbColor := ShiftBrightness(TrackColor, 40)
+    else
+      ThumbColor := ShiftBrightness(TrackColor, -50);
+  finally
+    ThemeColors.Free;
+  end;
+
+  if StyledVerticalVisible then
+  begin
+    Track := StyledVerticalScrollRect;
+    Canvas.Brush.Color := TrackColor;
+    Canvas.FillRect(Track);
+
+    Thumb := StyledVerticalThumbRect;
+    if Thumb.Height > 0 then
+    begin
+      InflateRect(Thumb, -2, -2);
+      Canvas.Brush.Color := ThumbColor;
+      Canvas.FillRect(Thumb);
+    end;
+  end;
+
+  if StyledHorizontalVisible then
+  begin
+    Track := StyledHorizontalScrollRect;
+    Canvas.Brush.Color := TrackColor;
+    Canvas.FillRect(Track);
+
+    Thumb := StyledHorizontalThumbRect;
+    if Thumb.Width > 0 then
+    begin
+      InflateRect(Thumb, -2, -2);
+      Canvas.Brush.Color := ThumbColor;
+      Canvas.FillRect(Thumb);
+    end;
   end;
 end;
 
@@ -1769,6 +2693,37 @@ begin
     Canvas.FillRect(Rect(Max(R.Left, X1), Y - 1, Max(R.Left, X2), Y + FLineHeight - 1));
   finally
     ThemeColors.Free;
+  end;
+end;
+
+procedure TCodeEditor.PaintSearchMatchesLine(ALineIndex, Y: Integer; const LineText: string);
+var
+  I: Integer;
+  Match: TCodeSearchMatch;
+  R: TRect;
+  X1: Integer;
+  X2: Integer;
+  FillColor: TColor;
+begin
+  if not SearchVisible or not Assigned(FSearchMatches) then
+    Exit;
+
+  R := ClientTextRect;
+  for I := 0 to FSearchMatches.Count - 1 do
+  begin
+    Match := FSearchMatches[I];
+    if Match.Line <> ALineIndex then
+      Continue;
+
+    X1 := R.Left + (Match.Column - FLeftColumn) * FCharWidth;
+    X2 := R.Left + (Match.Column + Match.Length - FLeftColumn) * FCharWidth;
+    if I = FSearchIndex then
+      FillColor := $00606000
+    else
+      FillColor := $00404040;
+
+    Canvas.Brush.Color := FillColor;
+    Canvas.FillRect(Rect(Max(R.Left, X1), Y - 1, Max(R.Left, X2), Y + FLineHeight - 1));
   end;
 end;
 

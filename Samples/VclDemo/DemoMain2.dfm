@@ -37,8 +37,6 @@ object Form2: TForm2
     Lines.Strings = (
       '')
     TabOrder = 0
-    ExplicitTop = -12
-    ExplicitHeight = 1047
   end
   object StatusBar1: TStatusBar
     Left = 0
@@ -62,9 +60,6 @@ object Form2: TForm2
     Margins.Bottom = 6
     Align = alTop
     TabOrder = 2
-    ExplicitLeft = 656
-    ExplicitTop = 128
-    ExplicitWidth = 370
     object ComboBox1: TComboBox
       Left = 32
       Top = 22

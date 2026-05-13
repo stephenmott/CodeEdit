@@ -131,6 +131,7 @@ BEGIN
   CodeEditor1.Highlighter := DelphiCodeHighlighter1;
   CodeEditor1.Lines.Text := cDelphi;
   CodeEditor1.CompletionProvider := FCompletionProvider;
+  CodeEditor1.StyledScrollBars := True;
 
 END;
 

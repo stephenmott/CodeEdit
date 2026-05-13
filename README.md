@@ -43,6 +43,32 @@ Completion starts with `TCustomCodeCompletionProvider` and
 Create more languages by deriving from `TCustomWordCodeHighlighter` and overriding
 keyword, comment, string, identifier, and number parsing methods.
 
+## Find and Replace
+
+Call `CodeEditor1.ShowFind` to open the find bar, or `CodeEditor1.ShowReplace`
+for find-and-replace. The current selection (when it sits on a single line) is
+used as the initial search term, so highlighting a word and opening find gives
+the expected result without retyping. Inside the find edit:
+
+- `Enter` jumps to the next match (`Shift+Enter` for previous).
+- `Esc` closes the panel.
+- Toggles are available for match case, whole word, and regular expressions.
+
+## Mouse and Selection
+
+- Double-click selects the word at the click position.
+- Drag selects a range; `Shift+Click` extends the existing selection.
+- Mouse wheel scrolls vertically; styled scrollbars accept click-to-page and
+  drag-to-scroll.
+
+## Scrollbars
+
+`StyledScrollBars` defaults to `True` and paints theme-matched scrollbars
+inside the client area. The track uses `GutterBackground` and the thumb is
+brightness-shifted from the track so it stays visible on both light and dark
+themes. Set `StyledScrollBars := False` to fall back to native Windows
+scrollbars.
+
 ## Styling
 
 `TCodeEditor.ThemeMode` defaults to `ctmVclStyle`, so the editor background,
@@ -76,5 +102,9 @@ come from DevExpress.
 - IME and Unicode edge-case handling
 - Multi-line lexer state for block comments, template strings, and conditional compiler sections
 - Virtualized rendering for very large files
-- Search panel, minimap, bracket matching, current-line highlight
+- Minimap, bracket matching, current-line highlight
 - IntelliSense-friendly APIs for diagnostics, completion, and symbol navigation
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
