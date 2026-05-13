@@ -37,6 +37,13 @@ object Form2: TForm2
     Lines.Strings = (
       '')
     TabOrder = 0
+    Breakpoints = <
+      item
+        Line = 10
+      end
+      item
+        Line = 15
+      end>
   end
   object StatusBar1: TStatusBar
     Left = 0

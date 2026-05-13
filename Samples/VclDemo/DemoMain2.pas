@@ -101,6 +101,7 @@ IMPLEMENTATION
 
 PROCEDURE TForm2.ComboBox1Change(Sender: TObject);
 BEGIN
+
   CASE ComboBox1.ItemIndex OF
     0: BEGIN
         CodeEditor1.Highlighter := DelphiCodeHighlighter1;

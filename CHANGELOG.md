@@ -6,6 +6,19 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Breakpoint support: click the gutter's breakpoint margin or press `F5` to
+  toggle a breakpoint; `ToggleBreakpoint` / `AddBreakpoint` / `RemoveBreakpoint`
+  / `ClearBreakpoints` / `HasBreakpoint` / `BreakpointLines` API and an
+  `OnBreakpointsChanged` event for the host to interrogate them. Line numbers are
+  1-based throughout, matching the gutter.
+- Published `Breakpoints` collection (`TCodeBreakpoints` / `TCodeBreakpoint`,
+  1-based `Line`) so breakpoints show in the Object Inspector and can be edited
+  or pre-seeded at design time; design-time edits repaint the gutter immediately.
+- `ExecutionLine` property (1-based; `-1` for none) that draws a current-statement
+  arrow in the gutter and a highlight band across the line, and scrolls the line
+  into view.
+- Breakpoints (and the execution line) shift to follow line insertions and
+  deletions; both are cleared when `Lines` is replaced or `Clear` is called.
 - Find and replace panel (`ShowFind` / `ShowReplace`) with match-case, whole-word,
   and regex toggles, plus next/previous navigation and a result counter.
 - Find panel seeds its initial search text from the editor's current selection

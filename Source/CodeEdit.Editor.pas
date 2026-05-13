@@ -105,6 +105,38 @@ type
     Length: Integer;
   end;
 
+  TCodeEditor = class;
+
+  // Line is 1-based, matching the gutter line numbers.
+  TCodeBreakpoint = class(TCollectionItem)
+  private
+    FLine: Integer;
+    procedure SetLine(Value: Integer);
+  protected
+    function GetDisplayName: string; override;
+  public
+    constructor Create(Collection: TCollection); override;
+    procedure Assign(Source: TPersistent); override;
+  published
+    property Line: Integer read FLine write SetLine default 1;
+  end;
+
+  TCodeBreakpoints = class(TOwnedCollection)
+  private
+    function GetItem(Index: Integer): TCodeBreakpoint;
+    procedure SetItem(Index: Integer; Value: TCodeBreakpoint);
+  protected
+    procedure Update(Item: TCollectionItem); override;
+  public
+    constructor Create(AOwner: TPersistent);
+    function IndexOfLine(ALine: Integer): Integer;
+    function ContainsLine(ALine: Integer): Boolean;
+    function AddLine(ALine: Integer): TCodeBreakpoint;
+    procedure RemoveLine(ALine: Integer);
+    function SortedLines: TArray<Integer>;
+    property Items[Index: Integer]: TCodeBreakpoint read GetItem write SetItem; default;
+  end;
+
   TCodeEditor = class(TCustomControl)
   private
     FLines: TStringList;
@@ -152,8 +184,11 @@ type
     FActiveUndoGroup: TCodeUndoGroupKind;
     FMaxUndo: Integer;
     FScrollBars: System.UITypes.TScrollStyle;
+    FBreakpoints: TCodeBreakpoints;
+    FExecutionLine: Integer;
     FOnChange: TNotifyEvent;
     FOnResolveTheme: TCodeEditorResolveThemeEvent;
+    FOnBreakpointsChanged: TNotifyEvent;
     procedure LinesChanged(Sender: TObject);
     procedure OptionsChanged(Sender: TObject);
     procedure ThemeChanged(Sender: TObject);
@@ -241,6 +276,12 @@ type
     procedure UpdateScrollBars;
     procedure MoveCaret(const Position: TCodePosition; Shift: TShiftState);
     procedure SelectWordAtCaret;
+    function LineAtPoint(const Point: TPoint): Integer;
+    procedure SetExecutionLine(Value: Integer);
+    procedure SetBreakpoints(Value: TCodeBreakpoints);
+    procedure BreakpointsChanged;
+    procedure ShiftBreakpoints(AfterLine, Delta: Integer);
+    procedure PaintBreakpointGlyph(const CellRect: TRect; HasBp, IsExec: Boolean);
     procedure InsertText(const Value: string; AddUndo: Boolean = True);
     procedure PaintGutter;
     procedure PaintText;
@@ -279,9 +320,16 @@ type
     procedure TriggerCompletion;
     procedure ShowFind;
     procedure ShowReplace;
+    procedure ToggleBreakpoint(Line: Integer);
+    procedure AddBreakpoint(Line: Integer);
+    procedure RemoveBreakpoint(Line: Integer);
+    procedure ClearBreakpoints;
+    function HasBreakpoint(Line: Integer): Boolean;
+    function BreakpointLines: TArray<Integer>;
     property CanUndoAction: Boolean read CanUndo;
     property CanRedoAction: Boolean read CanRedo;
     property Caret: TCodePosition read FCaret;
+    property ExecutionLine: Integer read FExecutionLine write SetExecutionLine;
     property SelectedText: string read GetSelectedText write SetSelectedText;
   published
     property Align;
@@ -302,6 +350,8 @@ type
     property TabStop default True;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     property OnResolveTheme: TCodeEditorResolveThemeEvent read FOnResolveTheme write FOnResolveTheme;
+    property Breakpoints: TCodeBreakpoints read FBreakpoints write SetBreakpoints;
+    property OnBreakpointsChanged: TNotifyEvent read FOnBreakpointsChanged write FOnBreakpointsChanged;
     property OnClick;
     property OnDblClick;
     property OnEnter;
@@ -326,6 +376,7 @@ uses
 
 const
   MinGutterWidth = 42;
+  BreakpointMarginWidth = 16;
 
 constructor TCodeEditorThemeColors.Create;
 begin
@@ -502,6 +553,136 @@ begin
   Result.Column := AColumn;
 end;
 
+constructor TCodeBreakpoint.Create(Collection: TCollection);
+begin
+  inherited Create(Collection);
+  FLine := 1;
+end;
+
+procedure TCodeBreakpoint.SetLine(Value: Integer);
+begin
+  if Value < 1 then
+    Value := 1;
+  if FLine <> Value then
+  begin
+    FLine := Value;
+    Changed(False);
+  end;
+end;
+
+function TCodeBreakpoint.GetDisplayName: string;
+begin
+  Result := Format('Line %d', [FLine]);
+end;
+
+procedure TCodeBreakpoint.Assign(Source: TPersistent);
+begin
+  if Source is TCodeBreakpoint then
+    Line := TCodeBreakpoint(Source).Line
+  else
+    inherited;
+end;
+
+constructor TCodeBreakpoints.Create(AOwner: TPersistent);
+begin
+  inherited Create(AOwner, TCodeBreakpoint);
+end;
+
+function TCodeBreakpoints.GetItem(Index: Integer): TCodeBreakpoint;
+begin
+  Result := TCodeBreakpoint(inherited Items[Index]);
+end;
+
+procedure TCodeBreakpoints.SetItem(Index: Integer; Value: TCodeBreakpoint);
+begin
+  inherited Items[Index] := Value;
+end;
+
+procedure TCodeBreakpoints.Update(Item: TCollectionItem);
+begin
+  inherited;
+  if GetOwner is TCodeEditor then
+    TCodeEditor(GetOwner).BreakpointsChanged;
+end;
+
+function TCodeBreakpoints.IndexOfLine(ALine: Integer): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to Count - 1 do
+    if Items[I].Line = ALine then
+      Exit(I);
+  Result := -1;
+end;
+
+function TCodeBreakpoints.ContainsLine(ALine: Integer): Boolean;
+begin
+  Result := IndexOfLine(ALine) >= 0;
+end;
+
+function TCodeBreakpoints.AddLine(ALine: Integer): TCodeBreakpoint;
+begin
+  BeginUpdate;
+  try
+    Result := TCodeBreakpoint(Add);
+    Result.Line := ALine;
+  finally
+    EndUpdate;
+  end;
+end;
+
+procedure TCodeBreakpoints.RemoveLine(ALine: Integer);
+var
+  Index: Integer;
+begin
+  Index := IndexOfLine(ALine);
+  if Index >= 0 then
+    Delete(Index);
+end;
+
+function TCodeBreakpoints.SortedLines: TArray<Integer>;
+
+  function Contains(const Arr: TArray<Integer>; UpTo, Value: Integer): Boolean;
+  var
+    K: Integer;
+  begin
+    for K := 0 to UpTo - 1 do
+      if Arr[K] = Value then
+        Exit(True);
+    Result := False;
+  end;
+
+var
+  I, J, Tmp, N, Line: Integer;
+begin
+  SetLength(Result, Count);
+  N := 0;
+  for I := 0 to Count - 1 do
+  begin
+    Line := Items[I].Line;
+    if Line < 1 then
+      Continue;
+    if Contains(Result, N, Line) then
+      Continue;
+    Result[N] := Line;
+    Inc(N);
+  end;
+  SetLength(Result, N);
+
+  // Insertion sort — breakpoint lists are small.
+  for I := 1 to High(Result) do
+  begin
+    Tmp := Result[I];
+    J := I - 1;
+    while (J >= 0) and (Result[J] > Tmp) do
+    begin
+      Result[J + 1] := Result[J];
+      Dec(J);
+    end;
+    Result[J + 1] := Tmp;
+  end;
+end;
+
 constructor TCodeEditor.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -529,6 +710,8 @@ begin
   FRedoStack := TStack<TCodeUndoItem>.Create;
   FSearchMatches := TList<TCodeSearchMatch>.Create;
   FSearchIndex := -1;
+  FBreakpoints := TCodeBreakpoints.Create(Self);
+  FExecutionLine := -1;
   FMaxUndo := 1024;
   FCaret := TCodePosition.Create(0, 0);
   FAnchor := FCaret;
@@ -545,6 +728,7 @@ begin
   HideCompletion;
   FCompletionItems.Free;
   FSearchMatches.Free;
+  FBreakpoints.Free;
   FinishUndoGroup;
   ClearUndo;
   FRedoStack.Free;
@@ -707,7 +891,7 @@ begin
     FLineHeight := Max(1, MeasureCanvas.TextHeight('Wg') + 2);
     FCharWidth := Max(1, MeasureCanvas.TextWidth('M'));
     FGutterWidth := IfThen(ShowGutter,
-      Max(MinGutterWidth, MeasureCanvas.TextWidth(IntToStr(LineCount)) + 18), 0);
+      Max(MinGutterWidth, MeasureCanvas.TextWidth(IntToStr(LineCount)) + 18) + BreakpointMarginWidth, 0);
   finally
     MeasureBitmap.Free;
   end;
@@ -1892,6 +2076,8 @@ begin
   FCaret := NormalizePosition(FCaret);
   FAnchor := FCaret;
   ClearUndo;
+  ClearBreakpoints;
+  FExecutionLine := -1;
   LinesChanged(Self);
 end;
 
@@ -1999,6 +2185,8 @@ begin
     FLines.Add('');
   FCaret := TCodePosition.Create(0, 0);
   FAnchor := FCaret;
+  ClearBreakpoints;
+  FExecutionLine := -1;
   LinesChanged(Self);
 end;
 
@@ -2037,6 +2225,8 @@ begin
   finally
     FLines.EndUpdate;
   end;
+  if EndPos.Line > StartPos.Line then
+    ShiftBreakpoints(StartPos.Line + 1, -(EndPos.Line - StartPos.Line));
 end;
 
 procedure TCodeEditor.InsertText(const Value: string; AddUndo: Boolean);
@@ -2085,6 +2275,9 @@ begin
     Tail := Copy(Current, FCaret.Column + 1, MaxInt);
     FLines[FCaret.Line] := Copy(Current, 1, FCaret.Column) + Parts[0];
     FCaret.Column := Length(FLines[FCaret.Line]);
+
+    if Parts.Count > 1 then
+      ShiftBreakpoints(FCaret.Line + 1, Parts.Count - 1);
 
     for I := 1 to Parts.Count - 1 do
     begin
@@ -2208,6 +2401,7 @@ begin
         begin
           FLines[FCaret.Line] := FLines[FCaret.Line] + FLines[FCaret.Line + 1];
           FLines.Delete(FCaret.Line + 1);
+          ShiftBreakpoints(FCaret.Line + 1, -1);
         end;
         LinesChanged(Self);
         CommitUndoState(UndoItem);
@@ -2277,6 +2471,11 @@ begin
           Undo;
         Key := 0;
       end;
+    VK_F5:
+      begin
+        ToggleBreakpoint(FCaret.Line + 1);
+        Key := 0;
+      end;
   end;
 end;
 
@@ -2315,6 +2514,7 @@ begin
           FCaret.Column := Length(FLines[FCaret.Line - 1]);
           FLines[FCaret.Line - 1] := FLines[FCaret.Line - 1] + FLines[FCaret.Line];
           FLines.Delete(FCaret.Line);
+          ShiftBreakpoints(FCaret.Line, -1);
           Dec(FCaret.Line);
           FAnchor := FCaret;
         end;
@@ -2405,6 +2605,13 @@ begin
           Invalidate;
         end;
       end;
+      Exit;
+    end;
+    if FOptions.ShowGutter and (FGutterWidth > 0) and (X < BreakpointMarginWidth) then
+    begin
+      NewPos := LineAtPoint(Point(X, Y));
+      if NewPos >= 0 then
+        ToggleBreakpoint(NewPos + 1);
       Exit;
     end;
     MoveCaret(PointToCaret(Point(X, Y)), Shift);
@@ -2520,6 +2727,190 @@ begin
   Invalidate;
 end;
 
+function TCodeEditor.LineAtPoint(const Point: TPoint): Integer;
+begin
+  Result := FTopLine + (Point.Y div FLineHeight);
+  if (Result < 0) or (Result >= FLines.Count) then
+    Result := -1;
+end;
+
+procedure TCodeEditor.BreakpointsChanged;
+begin
+  if csDestroying in ComponentState then
+    Exit;
+  Invalidate;
+  if csDesigning in ComponentState then
+    Update;  // the form designer doesn't always honor a plain Invalidate
+  if Assigned(FOnBreakpointsChanged) and not (csLoading in ComponentState) then
+    FOnBreakpointsChanged(Self);
+end;
+
+function TCodeEditor.HasBreakpoint(Line: Integer): Boolean;
+begin
+  Result := FBreakpoints.ContainsLine(Line);
+end;
+
+procedure TCodeEditor.AddBreakpoint(Line: Integer);
+begin
+  if (Line < 1) or (Line > FLines.Count) then
+    Exit;
+  if FBreakpoints.ContainsLine(Line) then
+    Exit;
+  FBreakpoints.AddLine(Line);
+end;
+
+procedure TCodeEditor.RemoveBreakpoint(Line: Integer);
+begin
+  FBreakpoints.RemoveLine(Line);
+end;
+
+procedure TCodeEditor.ToggleBreakpoint(Line: Integer);
+begin
+  if (Line < 1) or (Line > FLines.Count) then
+    Exit;
+  if FBreakpoints.ContainsLine(Line) then
+    RemoveBreakpoint(Line)
+  else
+    AddBreakpoint(Line);
+end;
+
+procedure TCodeEditor.ClearBreakpoints;
+begin
+  if FBreakpoints.Count = 0 then
+    Exit;
+  FBreakpoints.Clear;
+end;
+
+function TCodeEditor.BreakpointLines: TArray<Integer>;
+begin
+  Result := FBreakpoints.SortedLines;
+end;
+
+procedure TCodeEditor.SetBreakpoints(Value: TCodeBreakpoints);
+begin
+  FBreakpoints.Assign(Value);
+end;
+
+procedure TCodeEditor.SetExecutionLine(Value: Integer);
+var
+  Idx: Integer;
+begin
+  if (Value < 1) or (Value > FLines.Count) then
+    Value := -1;  // -1 (or any value < 1) means "no current line"
+  if FExecutionLine = Value then
+    Exit;
+  FExecutionLine := Value;
+  if FExecutionLine >= 1 then
+  begin
+    Idx := FExecutionLine - 1;
+    if Idx < FTopLine then
+      FTopLine := Idx
+    else if Idx >= FTopLine + VisibleLineCount then
+      FTopLine := Idx - VisibleLineCount + 1;
+    FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
+    UpdateScrollBars;
+  end;
+  Invalidate;
+end;
+
+procedure TCodeEditor.ShiftBreakpoints(AfterLine, Delta: Integer);
+var
+  I: Integer;
+  Bp: Integer;
+  Affected: Boolean;
+
+  function Remap(L: Integer): Integer;
+  begin
+    Result := L;
+    if L <= AfterLine then
+      Exit;
+    if Delta >= 0 then
+      Result := L + Delta
+    else if L <= AfterLine - Delta then
+      Result := AfterLine
+    else
+      Result := L + Delta;
+  end;
+
+begin
+  if Delta = 0 then
+    Exit;
+
+  Affected := (FExecutionLine > AfterLine);
+  if not Affected then
+    for I := 0 to FBreakpoints.Count - 1 do
+      if Remap(FBreakpoints[I].Line) <> FBreakpoints[I].Line then
+      begin
+        Affected := True;
+        Break;
+      end;
+  if not Affected then
+    Exit;
+
+  FBreakpoints.BeginUpdate;
+  try
+    for I := FBreakpoints.Count - 1 downto 0 do
+    begin
+      Bp := FBreakpoints[I].Line;
+      FBreakpoints[I].Line := Remap(Bp);
+    end;
+    // Remapping can produce duplicates when lines are merged together.
+    for I := FBreakpoints.Count - 1 downto 1 do
+      if FBreakpoints.IndexOfLine(FBreakpoints[I].Line) < I then
+        FBreakpoints.Delete(I);
+  finally
+    FBreakpoints.EndUpdate;
+  end;
+
+  if FExecutionLine > AfterLine then
+  begin
+    if (Delta < 0) and (FExecutionLine <= AfterLine - Delta) then
+      FExecutionLine := -1
+    else
+      FExecutionLine := FExecutionLine + Delta;
+  end;
+end;
+
+procedure TCodeEditor.PaintBreakpointGlyph(const CellRect: TRect; HasBp, IsExec: Boolean);
+var
+  Size: Integer;
+  Dot: TRect;
+  Cx, Cy: Integer;
+  Arrow: array[0..2] of TPoint;
+begin
+  Size := Min(CellRect.Width, FLineHeight) - 4;
+  if Size < 6 then
+    Size := Min(CellRect.Width, FLineHeight);
+  Cx := (CellRect.Left + CellRect.Right) div 2;
+  Cy := (CellRect.Top + CellRect.Bottom) div 2;
+
+  if HasBp then
+  begin
+    Dot := Rect(Cx - Size div 2, Cy - Size div 2, Cx - Size div 2 + Size, Cy - Size div 2 + Size);
+    Canvas.Brush.Color := $003C3CE0;
+    Canvas.Pen.Color := $002020A0;
+    Canvas.Ellipse(Dot);
+  end;
+
+  if IsExec then
+  begin
+    Arrow[0] := Point(CellRect.Left + 2, Cy - Size div 3);
+    Arrow[1] := Point(CellRect.Left + 2, Cy + Size div 3);
+    Arrow[2] := Point(CellRect.Right - 2, Cy);
+    if HasBp then
+    begin
+      Canvas.Brush.Color := $0020D0F0;
+      Canvas.Pen.Color := $001090C0;
+    end
+    else
+    begin
+      Canvas.Brush.Color := $00E0A020;
+      Canvas.Pen.Color := $00A07010;
+    end;
+    Canvas.Polygon(Arrow);
+  end;
+end;
+
 procedure TCodeEditor.Paint;
 var
   ThemeColors: TCodeEditorThemeColors;
@@ -2545,6 +2936,9 @@ var
   Y: Integer;
   Text: string;
   R: TRect;
+  Cell: TRect;
+  HasBp: Boolean;
+  IsExec: Boolean;
   ThemeColors: TCodeEditorThemeColors;
 begin
   if not FOptions.ShowGutter then
@@ -2553,13 +2947,13 @@ begin
   ThemeColors := ActiveTheme;
   try
     R := Rect(0, 0, FGutterWidth, ClientHeight);
+    Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := ThemeColors.GutterBackground;
     Canvas.FillRect(R);
     Canvas.Pen.Color := ThemeColors.GutterBorder;
     Canvas.MoveTo(FGutterWidth - 1, 0);
     Canvas.LineTo(FGutterWidth - 1, ClientHeight);
 
-    Canvas.Font.Color := ThemeColors.GutterText;
     for I := 0 to VisibleLineCount - 1 do
     begin
       LineIndex := FTopLine + I;
@@ -2567,6 +2961,18 @@ begin
         Break;
 
       Y := I * FLineHeight + 1;
+      HasBp := HasBreakpoint(LineIndex + 1);
+      IsExec := (LineIndex + 1) = FExecutionLine;
+
+      if HasBp or IsExec then
+      begin
+        Cell := Rect(0, Y - 1, BreakpointMarginWidth, Y - 1 + FLineHeight);
+        PaintBreakpointGlyph(Cell, HasBp, IsExec);
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := ThemeColors.GutterBackground;
+      end;
+
+      Canvas.Font.Color := ThemeColors.GutterText;
       Text := IntToStr(LineIndex + 1);
       Canvas.TextOut(FGutterWidth - Canvas.TextWidth(Text) - 8, Y, Text);
     end;
@@ -2596,6 +3002,15 @@ begin
 
       Y := I * FLineHeight + 1;
       LineText := FLines[LineIndex];
+      if (LineIndex + 1) = FExecutionLine then
+      begin
+        if IsDarkTheme(ThemeColors) then
+          Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, 28)
+        else
+          Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, -22);
+        Canvas.FillRect(Rect(R.Left, Y - 1, R.Right, Y - 1 + FLineHeight));
+        Canvas.Brush.Color := ThemeColors.Background;
+      end;
       PaintSearchMatchesLine(LineIndex, Y, LineText);
       PaintSelectionLine(LineIndex, Y, LineText);
       PaintTokenText(LineText, R.Left, Y, LineIndex);
