@@ -102,6 +102,58 @@ type
     function ReadString(const ALine: string; Index: Integer): Integer; override;
   end;
 
+  TTungliCodeHighlighter = class(TCustomWordCodeHighlighter)
+  protected
+    procedure BuildKeywords; override;
+    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
+    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
+    function IsStringStart(Ch: Char): Boolean; override;
+    function ReadString(const ALine: string; Index: Integer): Integer; override;
+  end;
+
+  TBatchCodeHighlighter = class(TCustomWordCodeHighlighter)
+  protected
+    procedure BuildKeywords; override;
+    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
+    function IsStringStart(Ch: Char): Boolean; override;
+    function ReadString(const ALine: string; Index: Integer): Integer; override;
+  end;
+
+  TPowerShellCodeHighlighter = class(TCustomWordCodeHighlighter)
+  protected
+    procedure BuildKeywords; override;
+    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
+    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
+    function IsStringStart(Ch: Char): Boolean; override;
+    function ReadString(const ALine: string; Index: Integer): Integer; override;
+  end;
+
+  TIniCodeHighlighter = class(TCustomWordCodeHighlighter)
+  protected
+    procedure BuildKeywords; override;
+    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
+    function IsStringStart(Ch: Char): Boolean; override;
+    function ReadString(const ALine: string; Index: Integer): Integer; override;
+  end;
+
+  TYamlCodeHighlighter = class(TCustomWordCodeHighlighter)
+  protected
+    procedure BuildKeywords; override;
+    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
+    function IsStringStart(Ch: Char): Boolean; override;
+    function ReadString(const ALine: string; Index: Integer): Integer; override;
+  end;
+
+  TPythonCodeHighlighter = class(TCustomWordCodeHighlighter)
+  protected
+    procedure BuildKeywords; override;
+    function CaseSensitive: Boolean; override;
+    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
+    function IsStringStart(Ch: Char): Boolean; override;
+    function ReadNumber(const ALine: string; Index: Integer): Integer; override;
+    function ReadString(const ALine: string; Index: Integer): Integer; override;
+  end;
+
 implementation
 
 uses
@@ -601,6 +653,356 @@ begin
     end
     else
       Inc(Result);
+  end;
+end;
+
+procedure TTungliCodeHighlighter.BuildKeywords;
+begin
+  AddKeywords([
+    'if', 'then', 'else', 'while', 'do', 'procedure', 'exec', 'break',
+    'continue', 'exit', 'beep', 'end', 'and', 'or', 'not', 'div', 'mod',
+    'in', 'like', 'wildcard',
+    '_now', '_date', '_time', '_lf', '_tb', '_pi'
+  ]);
+end;
+
+function TTungliCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
+  out EndDelimiter: string): Boolean;
+begin
+  if StartsTextAt(ALine, Index, '/*', True) then
+  begin
+    EndDelimiter := '*/';
+    Exit(True);
+  end;
+
+  EndDelimiter := '';
+  Result := False;
+end;
+
+function TTungliCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
+begin
+  Result := False;
+end;
+
+function TTungliCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+begin
+  Result := Ch = '"';
+end;
+
+function TTungliCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
+var
+  Quote: Char;
+begin
+  Quote := ALine[Index];
+  Result := Index + 1;
+  while (Result <= Length(ALine)) and (ALine[Result] <> Quote) do
+    Inc(Result);
+  if Result <= Length(ALine) then
+    Inc(Result);
+end;
+
+procedure TBatchCodeHighlighter.BuildKeywords;
+begin
+  AddKeywords([
+    'if', 'else', 'for', 'in', 'do', 'goto', 'call', 'exit', 'exist', 'not',
+    'defined', 'errorlevel', 'equ', 'neq', 'lss', 'leq', 'gtr', 'geq',
+    'echo', 'set', 'setlocal', 'endlocal', 'pause', 'start', 'shift',
+    'choice', 'rem', 'cls', 'title', 'color', 'prompt', 'pushd', 'popd',
+    'cd', 'chdir', 'md', 'mkdir', 'rd', 'rmdir', 'del', 'erase', 'copy',
+    'xcopy', 'move', 'ren', 'rename', 'type', 'find', 'findstr', 'sort',
+    'more', 'attrib', 'date', 'time', 'ver', 'vol', 'chcp', 'tasklist',
+    'taskkill', 'where', 'verify', 'assoc', 'ftype', 'enableextensions',
+    'enabledelayedexpansion', 'disableextensions', 'disabledelayedexpansion'
+  ]);
+end;
+
+function TBatchCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
+var
+  J: Integer;
+begin
+  if StartsTextAt(ALine, Index, '::', True) then
+    Exit(True);
+
+  if not StartsTextAt(ALine, Index, 'rem', False) then
+    Exit(False);
+
+  J := Index + 3;
+  if (J <= Length(ALine)) and IsIdentifierChar(ALine[J]) then
+    Exit(False);
+
+  for J := 1 to Index - 1 do
+    if not ALine[J].IsWhiteSpace then
+      Exit(False);
+
+  Result := True;
+end;
+
+function TBatchCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+begin
+  Result := Ch = '"';
+end;
+
+function TBatchCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
+begin
+  Result := Index + 1;
+  while (Result <= Length(ALine)) and (ALine[Result] <> '"') do
+    Inc(Result);
+  if Result <= Length(ALine) then
+    Inc(Result);
+end;
+
+procedure TPowerShellCodeHighlighter.BuildKeywords;
+begin
+  AddKeywords([
+    'begin', 'break', 'catch', 'class', 'continue', 'data', 'define', 'do',
+    'dynamicparam', 'else', 'elseif', 'end', 'enum', 'exit', 'filter',
+    'finally', 'for', 'foreach', 'from', 'function', 'hidden', 'if', 'in',
+    'inlinescript', 'parallel', 'param', 'process', 'return', 'sequence',
+    'static', 'switch', 'throw', 'trap', 'try', 'until', 'using', 'var',
+    'while', 'workflow',
+    'true', 'false', 'null'
+  ]);
+end;
+
+function TPowerShellCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
+  out EndDelimiter: string): Boolean;
+begin
+  if StartsTextAt(ALine, Index, '<#', True) then
+  begin
+    EndDelimiter := '#>';
+    Exit(True);
+  end;
+
+  EndDelimiter := '';
+  Result := False;
+end;
+
+function TPowerShellCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
+begin
+  Result := StartsTextAt(ALine, Index, '#', True);
+end;
+
+function TPowerShellCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+begin
+  Result := CharInSet(Ch, ['''', '"']);
+end;
+
+function TPowerShellCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
+var
+  Quote: Char;
+  Escaped: Boolean;
+begin
+  Quote := ALine[Index];
+  Result := Index + 1;
+  if Quote = '"' then
+  begin
+    Escaped := False;
+    while Result <= Length(ALine) do
+    begin
+      if Escaped then
+        Escaped := False
+      else if ALine[Result] = '`' then
+        Escaped := True
+      else if ALine[Result] = Quote then
+      begin
+        Inc(Result);
+        Break;
+      end;
+      Inc(Result);
+    end;
+  end
+  else
+  begin
+    while Result <= Length(ALine) do
+    begin
+      if ALine[Result] = Quote then
+      begin
+        Inc(Result);
+        if (Result <= Length(ALine)) and (ALine[Result] = Quote) then
+          Inc(Result)
+        else
+          Break;
+      end
+      else
+        Inc(Result);
+    end;
+  end;
+end;
+
+procedure TIniCodeHighlighter.BuildKeywords;
+begin
+  AddKeywords([
+    'true', 'false', 'yes', 'no', 'on', 'off', 'null'
+  ]);
+end;
+
+function TIniCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
+begin
+  Result := StartsTextAt(ALine, Index, ';', True) or
+            StartsTextAt(ALine, Index, '#', True);
+end;
+
+function TIniCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+begin
+  Result := CharInSet(Ch, ['''', '"', '[']);
+end;
+
+function TIniCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
+var
+  Quote: Char;
+begin
+  if ALine[Index] = '[' then
+  begin
+    Result := Index + 1;
+    while (Result <= Length(ALine)) and (ALine[Result] <> ']') do
+      Inc(Result);
+    if Result <= Length(ALine) then
+      Inc(Result);
+    Exit;
+  end;
+
+  Quote := ALine[Index];
+  Result := Index + 1;
+  while (Result <= Length(ALine)) and (ALine[Result] <> Quote) do
+    Inc(Result);
+  if Result <= Length(ALine) then
+    Inc(Result);
+end;
+
+procedure TYamlCodeHighlighter.BuildKeywords;
+begin
+  AddKeywords([
+    'true', 'false', 'yes', 'no', 'on', 'off', 'null'
+  ]);
+end;
+
+function TYamlCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
+begin
+  Result := StartsTextAt(ALine, Index, '#', True);
+end;
+
+function TYamlCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+begin
+  Result := CharInSet(Ch, ['''', '"']);
+end;
+
+function TYamlCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
+var
+  Quote: Char;
+  Escaped: Boolean;
+begin
+  Quote := ALine[Index];
+  Result := Index + 1;
+  if Quote = '"' then
+  begin
+    Escaped := False;
+    while Result <= Length(ALine) do
+    begin
+      if Escaped then
+        Escaped := False
+      else if ALine[Result] = '\' then
+        Escaped := True
+      else if ALine[Result] = Quote then
+      begin
+        Inc(Result);
+        Break;
+      end;
+      Inc(Result);
+    end;
+  end
+  else
+  begin
+    while Result <= Length(ALine) do
+    begin
+      if ALine[Result] = Quote then
+      begin
+        Inc(Result);
+        if (Result <= Length(ALine)) and (ALine[Result] = Quote) then
+          Inc(Result)
+        else
+          Break;
+      end
+      else
+        Inc(Result);
+    end;
+  end;
+end;
+
+procedure TPythonCodeHighlighter.BuildKeywords;
+begin
+  AddKeywords([
+    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+    'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+    'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+    'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try',
+    'while', 'with', 'yield', 'match', 'case'
+  ]);
+end;
+
+function TPythonCodeHighlighter.CaseSensitive: Boolean;
+begin
+  Result := True;
+end;
+
+function TPythonCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
+begin
+  Result := StartsTextAt(ALine, Index, '#', True);
+end;
+
+function TPythonCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+begin
+  Result := CharInSet(Ch, ['''', '"']);
+end;
+
+function TPythonCodeHighlighter.ReadNumber(const ALine: string; Index: Integer): Integer;
+begin
+  Result := Index;
+  repeat
+    Inc(Result);
+  until (Result > Length(ALine)) or not (ALine[Result].IsLetterOrDigit or
+    CharInSet(ALine[Result], ['.', '_']));
+end;
+
+function TPythonCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
+var
+  Quote: Char;
+  Triple: Boolean;
+  Escaped: Boolean;
+begin
+  Quote := ALine[Index];
+  Triple := (Index + 2 <= Length(ALine)) and
+            (ALine[Index + 1] = Quote) and (ALine[Index + 2] = Quote);
+  if Triple then
+  begin
+    Result := Index + 3;
+    while Result + 2 <= Length(ALine) do
+    begin
+      if (ALine[Result] = Quote) and (ALine[Result + 1] = Quote) and
+         (ALine[Result + 2] = Quote) then
+      begin
+        Inc(Result, 3);
+        Exit;
+      end;
+      Inc(Result);
+    end;
+    Result := Length(ALine) + 1;
+    Exit;
+  end;
+
+  Escaped := False;
+  Result := Index + 1;
+  while Result <= Length(ALine) do
+  begin
+    if Escaped then
+      Escaped := False
+    else if ALine[Result] = '\' then
+      Escaped := True
+    else if ALine[Result] = Quote then
+    begin
+      Inc(Result);
+      Break;
+    end;
+    Inc(Result);
   end;
 end;
 

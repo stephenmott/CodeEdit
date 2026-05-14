@@ -72,6 +72,218 @@ CONST
     'set Status = ''Review''' + sLineBreak +
     'where LastOrderDate < ''2025-01-01'';' + sLineBreak;
 
+  cTungliDemoText   =
+    '/* Tungli script - generate a scoring report */' + sLineBreak +
+    '' + sLineBreak +
+    'PROCEDURE BuildHeader {' + sLineBreak +
+    '  header := "Report generated: " || _DATE || " " || _TIME ;' + sLineBreak +
+    '  divider := "----------------------------------------" ;' + sLineBreak +
+    '}' + sLineBreak +
+    '' + sLineBreak +
+    'PROCEDURE BuildBody {' + sLineBreak +
+    '  body := "" ;' + sLineBreak +
+    '  total := 0 ;' + sLineBreak +
+    '  i := 1 ;' + sLineBreak +
+    '  WHILE i <= 5 DO {' + sLineBreak +
+    '    score := i * 10 ;' + sLineBreak +
+    '    total := total + score ;' + sLineBreak +
+    '    IF score >= 30 THEN {' + sLineBreak +
+    '      label := "Pass" ;' + sLineBreak +
+    '    } ELSE {' + sLineBreak +
+    '      label := "Fail" ;' + sLineBreak +
+    '    }' + sLineBreak +
+    '    body := body || Prefix(2, "0", String(i)) || " score=" || String(score)' + sLineBreak +
+    '                 || " " || label || _LF ;' + sLineBreak +
+    '    i := i + 1 ;' + sLineBreak +
+    '  }' + sLineBreak +
+    '  average := total / 5 ;' + sLineBreak +
+    '}' + sLineBreak +
+    '' + sLineBreak +
+    'EXEC BuildHeader ;' + sLineBreak +
+    'EXEC BuildBody ;' + sLineBreak +
+    '' + sLineBreak +
+    'result := header || _LF || divider || _LF || body || _LF' + sLineBreak +
+    '       || "Average: " || String(average) ;' + sLineBreak +
+    '' + sLineBreak +
+    'END.';
+
+  cBatchDemoText    =
+    '@echo off' + sLineBreak +
+    ':: Build script - package the release binaries' + sLineBreak +
+    '' + sLineBreak +
+    'setlocal enabledelayedexpansion' + sLineBreak +
+    '' + sLineBreak +
+    'set ROOT=%~dp0' + sLineBreak +
+    'set DIST=%ROOT%dist' + sLineBreak +
+    'set VERSION=1.2.0' + sLineBreak +
+    '' + sLineBreak +
+    'if not exist "%DIST%" (' + sLineBreak +
+    '    mkdir "%DIST%"' + sLineBreak +
+    ')' + sLineBreak +
+    '' + sLineBreak +
+    'rem Build each target listed below' + sLineBreak +
+    'for %%T in (win32 win64 linux) do (' + sLineBreak +
+    '    echo Building %%T...' + sLineBreak +
+    '    call :build %%T' + sLineBreak +
+    '    if errorlevel 1 (' + sLineBreak +
+    '        echo Build failed for %%T' + sLineBreak +
+    '        exit /b 1' + sLineBreak +
+    '    )' + sLineBreak +
+    ')' + sLineBreak +
+    '' + sLineBreak +
+    'echo Done. Artifacts in "%DIST%"' + sLineBreak +
+    'endlocal' + sLineBreak +
+    'exit /b 0' + sLineBreak +
+    '' + sLineBreak +
+    ':build' + sLineBreak +
+    'set TARGET=%~1' + sLineBreak +
+    'echo   target=!TARGET! version=!VERSION!' + sLineBreak +
+    'copy /Y bin\app-!TARGET!.exe "%DIST%\app-!VERSION!-!TARGET!.exe" >nul' + sLineBreak +
+    'exit /b 0';
+
+  cPowerShellDemoText =
+    '<#' + sLineBreak +
+    '.SYNOPSIS' + sLineBreak +
+    '    Tail a log file and group entries by severity.' + sLineBreak +
+    '#>' + sLineBreak +
+    '' + sLineBreak +
+    'param(' + sLineBreak +
+    '    [Parameter(Mandatory = $true)]' + sLineBreak +
+    '    [string]$Path,' + sLineBreak +
+    '' + sLineBreak +
+    '    [int]$Tail = 200' + sLineBreak +
+    ')' + sLineBreak +
+    '' + sLineBreak +
+    '# Read the last $Tail lines of the file' + sLineBreak +
+    '$lines = Get-Content -Path $Path -Tail $Tail' + sLineBreak +
+    '' + sLineBreak +
+    '$groups = @{' + sLineBreak +
+    '    ''ERROR'' = 0' + sLineBreak +
+    '    ''WARN''  = 0' + sLineBreak +
+    '    ''INFO''  = 0' + sLineBreak +
+    '}' + sLineBreak +
+    '' + sLineBreak +
+    'foreach ($line in $lines) {' + sLineBreak +
+    '    if ($line -match ''^(?<level>ERROR|WARN|INFO)\s+(?<msg>.+)$'') {' + sLineBreak +
+    '        $level = $matches[''level'']' + sLineBreak +
+    '        $groups[$level]++' + sLineBreak +
+    '    }' + sLineBreak +
+    '}' + sLineBreak +
+    '' + sLineBreak +
+    '$total = ($groups.Values | Measure-Object -Sum).Sum' + sLineBreak +
+    'Write-Host "Scanned $total entries from $Path" -ForegroundColor Cyan' + sLineBreak +
+    '' + sLineBreak +
+    'foreach ($key in $groups.Keys) {' + sLineBreak +
+    '    $count = $groups[$key]' + sLineBreak +
+    '    $pct = if ($total -gt 0) { [math]::Round(100 * $count / $total, 1) } else { 0 }' + sLineBreak +
+    '    "{0,-6} {1,5}  {2,5}%" -f $key, $count, $pct' + sLineBreak +
+    '}';
+
+  cIniDemoText      =
+    '; Application configuration' + sLineBreak +
+    '; Lines starting with ; or # are comments' + sLineBreak +
+    '' + sLineBreak +
+    '[general]' + sLineBreak +
+    'title = "CodeEdit Demo"' + sLineBreak +
+    'version = 1.2.0' + sLineBreak +
+    'locale = en-GB' + sLineBreak +
+    'trace = false' + sLineBreak +
+    '' + sLineBreak +
+    '[window]' + sLineBreak +
+    'x = 100' + sLineBreak +
+    'y = 100' + sLineBreak +
+    'width = 1024' + sLineBreak +
+    'height = 768' + sLineBreak +
+    'maximized = no' + sLineBreak +
+    '' + sLineBreak +
+    '[editor]' + sLineBreak +
+    'font.name = "Cascadia Code"' + sLineBreak +
+    'font.size = 11' + sLineBreak +
+    'tab.size = 4' + sLineBreak +
+    'expand.tabs = yes' + sLineBreak +
+    'show.gutter = on' + sLineBreak +
+    '' + sLineBreak +
+    '[paths]' + sLineBreak +
+    'projects = C:\Work\Projects' + sLineBreak +
+    'backup   = D:\Backups\CodeEdit' + sLineBreak +
+    '' + sLineBreak +
+    '# trailing comment style is also valid';
+
+  cYamlDemoText     =
+    '# CI pipeline - build, test, publish' + sLineBreak +
+    '' + sLineBreak +
+    'name: build-and-publish' + sLineBreak +
+    'on:' + sLineBreak +
+    '  push:' + sLineBreak +
+    '    branches: [main]' + sLineBreak +
+    '  pull_request:' + sLineBreak +
+    '    branches: [''*'']' + sLineBreak +
+    '' + sLineBreak +
+    'env:' + sLineBreak +
+    '  CONFIG: Release' + sLineBreak +
+    '  RETRIES: 3' + sLineBreak +
+    '' + sLineBreak +
+    'jobs:' + sLineBreak +
+    '  build:' + sLineBreak +
+    '    runs-on: windows-latest' + sLineBreak +
+    '    steps:' + sLineBreak +
+    '      - uses: actions/checkout@v4' + sLineBreak +
+    '      - name: Restore packages' + sLineBreak +
+    '        run: |' + sLineBreak +
+    '          dotnet restore' + sLineBreak +
+    '          dotnet --info' + sLineBreak +
+    '      - name: Build' + sLineBreak +
+    '        run: dotnet build --configuration ${{ env.CONFIG }} --no-restore' + sLineBreak +
+    '        env:' + sLineBreak +
+    '          NUGET_XMLDOC_MODE: skip' + sLineBreak +
+    '      - name: Test' + sLineBreak +
+    '        run: dotnet test --no-build --verbosity normal' + sLineBreak +
+    '        continue-on-error: false' + sLineBreak +
+    '      - name: Notify' + sLineBreak +
+    '        if: failure()' + sLineBreak +
+    '        run: echo "Build failed"';
+
+  cPythonDemoText   =
+    '"""Customer report - summarise spend per customer."""' + sLineBreak +
+    '' + sLineBreak +
+    'from dataclasses import dataclass' + sLineBreak +
+    'from datetime import date' + sLineBreak +
+    'from typing import Iterable' + sLineBreak +
+    '' + sLineBreak +
+    'THRESHOLD = 1_000.0' + sLineBreak +
+    'LABELS = {True: "Active", False: "Dormant"}' + sLineBreak +
+    '' + sLineBreak +
+    '' + sLineBreak +
+    '@dataclass(frozen=True)' + sLineBreak +
+    'class Customer:' + sLineBreak +
+    '    customer_id: int' + sLineBreak +
+    '    name: str' + sLineBreak +
+    '    total_spend: float' + sLineBreak +
+    '    last_order: date' + sLineBreak +
+    '' + sLineBreak +
+    '' + sLineBreak +
+    'def is_active(customer: Customer, today: date) -> bool:' + sLineBreak +
+    '    delta_days = (today - customer.last_order).days' + sLineBreak +
+    '    return delta_days <= 90 and customer.total_spend >= THRESHOLD' + sLineBreak +
+    '' + sLineBreak +
+    '' + sLineBreak +
+    'def summarise(customers: Iterable[Customer], today: date | None = None) -> str:' + sLineBreak +
+    '    today = today or date.today()' + sLineBreak +
+    '    lines = ["id   name              spend       status"]' + sLineBreak +
+    '    for c in customers:' + sLineBreak +
+    '        status = LABELS[is_active(c, today)]' + sLineBreak +
+    '        lines.append(f"{c.customer_id:>4} {c.name:<18}{c.total_spend:>10.2f}  {status}")' + sLineBreak +
+    '    return "\n".join(lines)' + sLineBreak +
+    '' + sLineBreak +
+    '' + sLineBreak +
+    'if __name__ == "__main__":' + sLineBreak +
+    '    sample = [' + sLineBreak +
+    '        Customer(1, "Ada Lovelace",     2450.00, date(2026, 4, 12)),' + sLineBreak +
+    '        Customer(2, "Grace Hopper",      980.50, date(2025, 11, 30)),' + sLineBreak +
+    '        Customer(3, "Alan Turing",      3100.75, date(2026, 5, 1)),' + sLineBreak +
+    '    ]' + sLineBreak +
+    '    print(summarise(sample))';
+
 TYPE
   TForm2 = CLASS(TForm)
     CodeEditor1: TCodeEditor;
