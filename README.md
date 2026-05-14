@@ -14,7 +14,7 @@ iterate on.
 
 - `Source\CodeEdit.Editor.pas` contains `TCodeEditor`.
 - `Source\CodeEdit.Completion.pas` contains completion item/provider classes and a keyword provider.
-- `Source\CodeEdit.Highlighter.pas` contains the token model and extensible lexer/highlighter classes for Delphi, JavaScript, and SQL.
+- `Source\CodeEdit.Highlighter.pas` contains the token model and extensible lexer/highlighter classes for Delphi, JavaScript, SQL, Tungli, Batch (BAT/CMD), PowerShell, INI, YAML, and Python.
 - `Source\CodeEdit.Register.pas` registers the components on the `CodeEdit` palette page.
 - `Packages\CodeEditVcl.dpk` is the package shell.
 - `Samples\VclDemo` contains a small runtime demo.
@@ -34,6 +34,12 @@ Available highlighters:
 - `TDelphiCodeHighlighter`
 - `TJavaScriptCodeHighlighter`
 - `TSqlCodeHighlighter`
+- `TTungliCodeHighlighter` (`.tgl` scripts for `TInterpreter` / `TCalcul`)
+- `TBatchCodeHighlighter` (`.bat`, `.cmd`)
+- `TPowerShellCodeHighlighter` (`.ps1`, `.psm1`)
+- `TIniCodeHighlighter` (`.ini`, `.cfg`)
+- `TYamlCodeHighlighter` (`.yaml`, `.yml`)
+- `TPythonCodeHighlighter` (`.py`)
 
 Completion starts with `TCustomCodeCompletionProvider` and
 `TKeywordCompletionProvider`. Assign `CodeEditor1.CompletionProvider`, handle

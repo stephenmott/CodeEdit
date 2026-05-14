@@ -6,6 +6,11 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Highlighters for Tungli script (`TTungliCodeHighlighter`), BAT/CMD
+  (`TBatchCodeHighlighter`), PowerShell (`TPowerShellCodeHighlighter`),
+  INI (`TIniCodeHighlighter`), YAML (`TYamlCodeHighlighter`), and Python
+  (`TPythonCodeHighlighter`). All derive from `TCustomWordCodeHighlighter`
+  and are registered on the `CodeEdit` palette page.
 - Breakpoint support: click the gutter's breakpoint margin or press `F5` to
   toggle a breakpoint; `ToggleBreakpoint` / `AddBreakpoint` / `RemoveBreakpoint`
   / `ClearBreakpoints` / `HasBreakpoint` / `BreakpointLines` API and an

@@ -19,7 +19,13 @@ begin
     TKeywordCompletionProvider,
     TDelphiCodeHighlighter,
     TJavaScriptCodeHighlighter,
-    TSqlCodeHighlighter
+    TSqlCodeHighlighter,
+    TTungliCodeHighlighter,
+    TBatchCodeHighlighter,
+    TPowerShellCodeHighlighter,
+    TIniCodeHighlighter,
+    TYamlCodeHighlighter,
+    TPythonCodeHighlighter
   ]);
 end;
 
