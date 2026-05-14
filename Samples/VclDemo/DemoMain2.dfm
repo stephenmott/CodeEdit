@@ -28,6 +28,7 @@ object Form2: TForm2
     Margins.Right = 6
     Margins.Bottom = 6
     Align = alClient
+    CompletionProvider = KeywordCompletionProvider1
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
     Font.Height = -32
@@ -36,6 +37,8 @@ object Form2: TForm2
     Highlighter = DelphiCodeHighlighter1
     Lines.Strings = (
       '')
+    LineMarkers = <>
+    Modified = True
     TabOrder = 0
     Breakpoints = <
       item
@@ -44,6 +47,7 @@ object Form2: TForm2
       item
         Line = 15
       end>
+    OnKeyDown = CodeEditor1KeyDown
   end
   object StatusBar1: TStatusBar
     Left = 0
@@ -86,6 +90,19 @@ object Form2: TForm2
         'Javascript'
         'SQL')
     end
+    object CheckBox1: TCheckBox
+      Left = 432
+      Top = 25
+      Width = 194
+      Height = 34
+      Margins.Left = 6
+      Margins.Top = 6
+      Margins.Right = 6
+      Margins.Bottom = 6
+      Caption = 'Read-Only'
+      TabOrder = 1
+      OnClick = CheckBox1Click
+    end
   end
   object DelphiCodeHighlighter1: TDelphiCodeHighlighter
     Left = 160
@@ -98,5 +115,11 @@ object Form2: TForm2
   object SqlCodeHighlighter1: TSqlCodeHighlighter
     Left = 160
     Top = 448
+  end
+  object KeywordCompletionProvider1: TKeywordCompletionProvider
+    OnGetCompletions = KeywordCompletionProvider1GetCompletions
+    OnGetSignatureHelp = KeywordCompletionProvider1GetSignatureHelp
+    Left = 352
+    Top = 176
   end
 end

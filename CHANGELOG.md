@@ -28,7 +28,31 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 - Themed horizontal scrollbar mirroring the vertical one — track and thumb colors
   derive from the active theme, with a corner gap when both bars are visible.
 
+- Optional minimap (`Options.ShowMinimap`) that paints a compact syntax-colored
+  file map on the right, shows the visible viewport, and supports click/drag
+  scrolling.
+- `Options.MaxPasteBytes`, defaulting to 64 MB, to refuse oversized text pastes
+  before `Clipboard.AsText` tries to materialize them.
+- Script-editor integration basics: `ReadOnly`, `Modified`, public `Caret`,
+  `TopLine`, `LeftColumn`, `ShowLine`, public `InsertText`, plus
+  `OnCaretChange` and `OnSelectionChange`.
+- Debugger line-marker surface: published `LineMarkers` collection,
+  `AddLineMarker`, `RemoveLineMarker`, and `ClearLineMarkers`, with executable,
+  error, warning, and info marker kinds that paint gutter glyphs and line
+  background bands.
+- Signature/parameter help via `TCustomCodeCompletionProvider.OnGetSignatureHelp`,
+  `TCodeSignatureItems`, and `TriggerSignatureHelp`; the editor triggers it from
+  `(` / `<`, updates the active parameter on comma, and supports
+  `Ctrl+Shift+Space`.
+- Editing ergonomics: `ToggleLineComment`, `CommentSelection`,
+  `UncommentSelection`, `Options.LineCommentPrefix`, and lightweight bracket
+  matching via `Options.BracketMatching`.
+
 ### Changed
+- Minimap rendering now uses fixed-height mini rows and scrolls its content
+  instead of stretching the whole file to fill the minimap height.
+- Paste line splitting is now single-pass instead of repeatedly copying the
+  remaining text while searching for line breaks.
 - `TCodeEditor` window now sets `WS_CLIPCHILDREN` so child controls (notably the
   search panel) are no longer overpainted by the editor's own `Paint`.
 - Styled scrollbar colors now derive from the active theme (`GutterBackground`

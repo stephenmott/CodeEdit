@@ -29,6 +29,7 @@ Build/
 *.dproj.local
 *.groupproj.local
 *.skincfg
+.claude/
 
 # Logs/temp
 *.log

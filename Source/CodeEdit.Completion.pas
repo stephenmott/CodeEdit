@@ -31,6 +31,16 @@ type
     ExplicitRequest: Boolean;
   end;
 
+  TCodeSignatureHelpContext = record
+    Line: Integer;
+    Column: Integer;
+    LineText: string;
+    FunctionName: string;
+    TriggerChar: Char;
+    ActiveParameter: Integer;
+    ExplicitRequest: Boolean;
+  end;
+
   TCodeCompletionItem = class
   private
     FCaption: string;
@@ -52,16 +62,40 @@ type
       const ADetail: string = '');
   end;
 
+  TCodeSignatureItem = class
+  private
+    FDetail: string;
+    FName: string;
+    FParameters: TStringList;
+    function GetParameters: TStrings;
+  public
+    constructor Create(const AName: string; const AParameters: array of string; const ADetail: string = '');
+    destructor Destroy; override;
+    property Detail: string read FDetail write FDetail;
+    property Name: string read FName write FName;
+    property Parameters: TStrings read GetParameters;
+  end;
+
+  TCodeSignatureItems = class(TObjectList<TCodeSignatureItem>)
+  public
+    procedure AddItem(const AName: string; const AParameters: array of string; const ADetail: string = '');
+  end;
+
   TCodeCompletionEvent = procedure(Sender: TObject; const Context: TCodeCompletionContext;
     Items: TCodeCompletionItems) of object;
+  TCodeSignatureHelpEvent = procedure(Sender: TObject; const Context: TCodeSignatureHelpContext;
+    Items: TCodeSignatureItems) of object;
 
   TCustomCodeCompletionProvider = class(TComponent)
   private
     FOnGetCompletions: TCodeCompletionEvent;
+    FOnGetSignatureHelp: TCodeSignatureHelpEvent;
   public
     procedure GetCompletions(const Context: TCodeCompletionContext; Items: TCodeCompletionItems); virtual;
+    procedure GetSignatureHelp(const Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems); virtual;
   published
     property OnGetCompletions: TCodeCompletionEvent read FOnGetCompletions write FOnGetCompletions;
+    property OnGetSignatureHelp: TCodeSignatureHelpEvent read FOnGetSignatureHelp write FOnGetSignatureHelp;
   end;
 
   TKeywordCompletionProvider = class(TCustomCodeCompletionProvider)
@@ -99,11 +133,48 @@ begin
   Add(TCodeCompletionItem.Create(ACaption, AInsertText, AKind, ADetail));
 end;
 
+constructor TCodeSignatureItem.Create(const AName: string; const AParameters: array of string;
+  const ADetail: string);
+var
+  Parameter: string;
+begin
+  inherited Create;
+  FName := AName;
+  FDetail := ADetail;
+  FParameters := TStringList.Create;
+  for Parameter in AParameters do
+    FParameters.Add(Parameter);
+end;
+
+destructor TCodeSignatureItem.Destroy;
+begin
+  FParameters.Free;
+  inherited;
+end;
+
+function TCodeSignatureItem.GetParameters: TStrings;
+begin
+  Result := FParameters;
+end;
+
+procedure TCodeSignatureItems.AddItem(const AName: string; const AParameters: array of string;
+  const ADetail: string);
+begin
+  Add(TCodeSignatureItem.Create(AName, AParameters, ADetail));
+end;
+
 procedure TCustomCodeCompletionProvider.GetCompletions(const Context: TCodeCompletionContext;
   Items: TCodeCompletionItems);
 begin
   if Assigned(FOnGetCompletions) then
     FOnGetCompletions(Self, Context, Items);
+end;
+
+procedure TCustomCodeCompletionProvider.GetSignatureHelp(const Context: TCodeSignatureHelpContext;
+  Items: TCodeSignatureItems);
+begin
+  if Assigned(FOnGetSignatureHelp) then
+    FOnGetSignatureHelp(Self, Context, Items);
 end;
 
 constructor TKeywordCompletionProvider.Create(AOwner: TComponent);

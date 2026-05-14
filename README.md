@@ -40,6 +40,20 @@ Completion starts with `TCustomCodeCompletionProvider` and
 `OnGetCompletions` for callback-driven lists, and call
 `CodeEditor1.TriggerCompletion` or press `Ctrl+Space`.
 
+Signature help uses the same provider. Handle `OnGetSignatureHelp` and return
+one or more signatures; the editor triggers it after `(` or `<`, updates the
+active parameter after commas, and can show it explicitly with
+`CodeEditor1.TriggerSignatureHelp` (`Ctrl+Shift+Space` by default):
+
+```pascal
+procedure TMainForm.ProviderGetSignatureHelp(Sender: TObject;
+  const Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems);
+begin
+  if SameText(Context.FunctionName, 'ShowMessage') then
+    Items.AddItem('ShowMessage', ['Msg: string']);
+end;
+```
+
 Create more languages by deriving from `TCustomWordCodeHighlighter` and overriding
 keyword, comment, string, identifier, and number parsing methods.
 
@@ -54,12 +68,66 @@ the expected result without retyping. Inside the find edit:
 - `Esc` closes the panel.
 - Toggles are available for match case, whole word, and regular expressions.
 
+## Editor State API
+
+`ReadOnly` blocks keyboard paste/typing/deletion and public editing calls such
+as `InsertText`. `Modified` is set when the editor changes; host code can reset
+it to `False` after saving.
+
+The public caret/scroll surface is 0-based, matching `TCodeEditor.Caret.Line`:
+
+```pascal
+CodeEditor1.Caret := TCodePosition.Create(12, 4);
+CodeEditor1.ShowLine(12);
+CodeEditor1.TopLine := 12;
+CodeEditor1.LeftColumn := 0;
+CodeEditor1.InsertText('ShowMessage(''Hello'');');
+```
+
+Use `OnCaretChange` and `OnSelectionChange` to update status bars, command
+state, watch expressions, or host-side UI.
+
 ## Mouse and Selection
 
 - Double-click selects the word at the click position.
 - Drag selects a range; `Shift+Click` extends the existing selection.
 - Mouse wheel scrolls vertically; styled scrollbars accept click-to-page and
   drag-to-scroll.
+
+## Editing Helpers
+
+`ToggleLineComment`, `CommentSelection`, and `UncommentSelection` operate on the
+current line or selected lines. The prefix defaults to `//` and can be changed
+per host/language:
+
+```pascal
+CodeEditor1.Options.LineCommentPrefix := '--'; // SQL
+CodeEditor1.ToggleLineComment;
+```
+
+`Options.BracketMatching` defaults to `True` and paints a lightweight outline
+around matching `()`, `[]`, `{}`, or `<>` pairs around the caret.
+
+## Host Integration
+
+Most host settings are normal published properties, so existing form storage
+systems can persist the editor directly. For manual persistence, the usual
+surface is:
+
+```pascal
+Ini.WriteBool('Editor', 'Minimap', CodeEditor1.Options.ShowMinimap);
+Ini.WriteInteger('Editor', 'TabSize', CodeEditor1.Options.TabSize);
+Ini.WriteBool('Editor', 'StyledScrollBars', CodeEditor1.StyledScrollBars);
+Ini.WriteInteger('Editor', 'FontSize', CodeEditor1.Font.Size);
+```
+
+## Large Pasting
+
+`Options.MaxPasteBytes` defaults to 64 MB. `Ctrl+V` checks the clipboard text
+payload before asking VCL to materialize it and refuses larger text pastes with a
+warning beep. Set it to `0` to disable the guard, but very large files need a
+future virtual/document-backed storage model rather than the current in-memory
+`TStringList` line store.
 
 ## Scrollbars
 
@@ -68,6 +136,14 @@ inside the client area. The track uses `GutterBackground` and the thumb is
 brightness-shifted from the track so it stays visible on both light and dark
 themes. Set `StyledScrollBars := False` to fall back to native Windows
 scrollbars.
+
+## Minimap
+
+Set `CodeEditor1.Options.ShowMinimap := True` to show a VS Code-style file map
+on the right-hand side. The minimap uses the active syntax highlighter colors
+where possible, reserves editor layout space automatically, paints fixed-height
+mini rows instead of stretching short files to fill the panel, shows the visible
+viewport, and can be clicked or dragged to scroll through the file.
 
 ## Breakpoints
 
@@ -118,6 +194,23 @@ with the standard collection editor; design-time changes repaint the gutter
 immediately. `BreakpointLines` returns the same set as a sorted, de-duplicated
 array; the runtime `Add/Remove/Toggle` helpers keep it in sync.
 (`ExecutionLine` is runtime-only and is not published.)
+
+## Debugger Line Markers
+
+For debugger and compiler surfaces beyond breakpoints, use the published
+`LineMarkers` collection or the helper API:
+
+```pascal
+CodeEditor1.AddLineMarker(12, lmkExecutable);
+CodeEditor1.AddLineMarker(18, lmkError);
+CodeEditor1.ExecutionLine := 18;
+CodeEditor1.ShowLine(18 - 1); // ShowLine is 0-based
+```
+
+Marker lines are 1-based, matching breakpoints and gutter numbers. Supported
+kinds are `lmkExecutable`, `lmkError`, `lmkWarning`, and `lmkInfo`. Markers paint
+a gutter glyph plus a line background band; each marker can override
+`Background`, `Foreground`, and `Text` in the Object Inspector or at runtime.
 
 ### Edit tracking and lifetime
 
@@ -172,6 +265,12 @@ come from DevExpress.
 - Virtualized rendering for very large files
 - Minimap, bracket matching, current-line highlight
 - IntelliSense-friendly APIs for diagnostics, completion, and symbol navigation
+- Possible Delphi 7 compatibility branch/pass. The core owner-drawn editor should
+  be portable, but the current code uses modern Delphi features such as unit
+  namespaces, generics, `TArray<T>`, character helpers, `for..in`, Unicode string
+  assumptions, and VCL styles. A D7 pass would likely start with compatibility
+  helpers, typed non-generic containers, manual theme fallback, and ANSI/Unicode
+  scope decisions.
 
 ## Changelog
 

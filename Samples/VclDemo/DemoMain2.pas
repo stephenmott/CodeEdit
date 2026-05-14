@@ -81,8 +81,17 @@ TYPE
     SqlCodeHighlighter1: TSqlCodeHighlighter;
     Panel1: TPanel;
     ComboBox1: TComboBox;
+    CheckBox1: TCheckBox;
+    KeywordCompletionProvider1: TKeywordCompletionProvider;
     PROCEDURE FormCreate(Sender: TObject);
     PROCEDURE ComboBox1Change(Sender: TObject);
+    PROCEDURE CodeEditor1KeyDown(Sender: TObject; VAR Key: Word;
+      Shift: TShiftState);
+    PROCEDURE CheckBox1Click(Sender: TObject);
+    PROCEDURE KeywordCompletionProvider1GetCompletions(Sender: TObject;
+      CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
+    PROCEDURE KeywordCompletionProvider1GetSignatureHelp(Sender: TObject;
+      CONST Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems);
   PRIVATE
     { Private declarations }
     FCompletionProvider: TCustomCodeCompletionProvider;
@@ -98,6 +107,27 @@ VAR
 IMPLEMENTATION
 
 {$R *.dfm}
+
+PROCEDURE TForm2.CheckBox1Click(Sender: TObject);
+BEGIN
+  CodeEditor1.ReadOnly := CheckBox1.Checked;
+  CodeEditor1.Enabled := CheckBox1.Checked;
+END;
+
+PROCEDURE TForm2.CodeEditor1KeyDown(Sender: TObject; VAR Key: Word;
+  Shift: TShiftState);
+BEGIN
+  IF (Shift = [ssCtrl]) AND (Key = Ord('J')) THEN BEGIN
+    CodeEditor1.AddNextSelectionOccurrence;
+    Key := 0;
+  END ELSE IF (Shift = [ssCtrl, ssShift]) AND (Key = Ord('L')) THEN BEGIN
+    CodeEditor1.SelectAllSelectionOccurrences;
+    Key := 0;
+  END ELSE IF Key = VK_ESCAPE THEN BEGIN
+    CodeEditor1.ClearMultipleSelections;
+    Key := 0;
+  END;
+END;
 
 PROCEDURE TForm2.ComboBox1Change(Sender: TObject);
 BEGIN
@@ -133,7 +163,11 @@ BEGIN
   CodeEditor1.Lines.Text := cDelphi;
   CodeEditor1.CompletionProvider := FCompletionProvider;
   CodeEditor1.StyledScrollBars := True;
-
+  CodeEditor1.Options.ShowMinimap := True;
+  CodeEditor1.AddLineMarker(10, lmkError);
+  CodeEditor1.AddLineMarker(11, lmkExecutable);
+  CodeEditor1.AddLineMarker(12, lmkWarning);
+  CodeEditor1.AddLineMarker(13, lmkInfo);
 END;
 
 PROCEDURE TForm2.GetCompletions(Sender: TObject;
@@ -165,6 +199,20 @@ BEGIN
     IF (Context.Prefix = '') OR SameText(Copy(Keyword, 1, Length(Context.Prefix)), Context.Prefix)
       THEN
       Items.AddItem(Keyword, Keyword, ckKeyword, 'keyword');
+END;
+
+PROCEDURE TForm2.KeywordCompletionProvider1GetCompletions(Sender: TObject;
+  CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
+BEGIN
+  //Context.LineText
+  Items.AddItem('ShowMessage', 'ShowMessage', ckFunction, 'procedure');
+END;
+
+PROCEDURE TForm2.KeywordCompletionProvider1GetSignatureHelp(Sender: TObject;
+  CONST Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems);
+BEGIN
+  IF SameText(Context.FunctionName, 'ShowMessage') THEN
+    Items.AddItem('ShowMessage', ['Msg: string']);
 END;
 
 END.
