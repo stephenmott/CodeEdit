@@ -52,6 +52,25 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 - Editing ergonomics: `ToggleLineComment`, `CommentSelection`,
   `UncommentSelection`, `Options.LineCommentPrefix`, and lightweight bracket
   matching via `Options.BracketMatching`.
+- Multi-line highlighting: new `TokenizeLineState` API with per-line range
+  state and an `AddMultiLineRange` registry on `TCustomWordCodeHighlighter`.
+  Delphi `{ }` / `(* *)`, JS `/* */` and template literals, SQL/Tungli
+  `/* */`, PowerShell `<# #>`, and Python triple-quoted strings now span
+  lines correctly. (`IsBlockCommentStart` / `ReadBlockComment` are replaced
+  by `BuildMultiLineRanges`.)
+- Keyboard: desired-column memory for vertical movement, `Ctrl+Left/Right`
+  word navigation, `Ctrl+Home/End`, Tab indents multi-line selections,
+  `Shift+Tab` unindents, `Ctrl+D` adds the next occurrence as a caret,
+  `Ctrl+Shift+L` selects all occurrences, `F9` toggles breakpoints
+  (alongside `F5`), and `Esc` closes the search panel from the editor.
+- Public `IndentSelection` / `UnindentSelection` methods.
+- Selected text is painted with `Theme.SelectionText` so selections stay
+  readable on any palette.
+- Component palette icons for all components, and a new ScrEdit sample.
+- Console regression test for tokenizer state transitions
+  (`Tests/TestHighlighterState.dpr`).
+- API documentation under `docs/` (editor, highlighters, completion,
+  breakpoints/markers) linked from a restructured README.
 
 ### Changed
 - Minimap rendering now uses fixed-height mini rows and scrolls its content
@@ -70,6 +89,23 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 - Mouse wheel, `WM_VSCROLL`, `WM_HSCROLL`, styled-track clicks, and styled-thumb
   drags all early-exit without repainting when the clamped position is unchanged,
   so scrolling at the limit no longer triggers continuous redraws.
+- Painting now resolves the theme once per paint instead of per line per
+  helper, hoists the bracket-match scan and occurrence needle out of the
+  per-line loop, and caches per-line tokens (shared with the minimap).
+- `MaxLineLength` is cached behind a dirty flag and line changes no longer
+  create a measuring bitmap, so large documents type smoothly.
+- Search matching uses `PosEx` with a hoisted lowercase haystack; matches
+  refresh live while the document is edited, and Replace advances to the
+  next match instead of resetting to the first.
+- Completion and signature popups hide on focus loss and scrolling, use
+  `PopupParent` instead of process-wide `fsStayOnTop`, and the completion
+  popup is borderless.
+- Angle brackets are no longer treated as matchable brackets (every `<`
+  comparison paired with an unrelated `>`).
+- `Ctrl+C` / `Ctrl+X` are no-ops without a selection instead of clearing
+  the clipboard.
+- Tab characters render one cell wide so caret math stays aligned.
+- The unimplemented `Options.WordWrap` property was removed.
 
 ### Fixed
 - Search edit no longer rings the system bell when `Enter` or `Esc` are pressed
@@ -78,6 +114,19 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   that resets the anchor — selection now happens after the caret has been moved.
 - Last visible line is no longer covered by the horizontal scrollbar; line count
   derivation now uses `ClientTextRect.Height`.
+- Use-after-free on destroy: the active typing undo group was committed after
+  the breakpoint/marker collections were freed.
+- The completion popup form was never freed (memory leak).
+- Freeing a highlighter or completion provider before the editor left a
+  dangling reference (now handled via `FreeNotification`).
+- Characters above U+00FF (Cyrillic, CJK, IME input) were silently dropped
+  by `KeyPress`.
+- Regex search results were off by one column (`TMatch.Index` is 1-based).
+- Native scrollbar thumb-tracking was limited to 16-bit positions; now uses
+  `SIF_TRACKPOS`.
+- Undo restores the `Modified` flag to its pre-edit value.
+- Repaired a duplicated, unterminated compiler-options block in
+  `CodeEditVcl.dpk` that broke the package build.
 
 ## Initial commit
 

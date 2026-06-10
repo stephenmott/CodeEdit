@@ -1,282 +1,99 @@
 # CodeEdit
 
-Native Delphi/VCL code editor component.
+Native Delphi/VCL code editor component. No third-party dependencies — just
+the RTL and VCL.
 
 Released under the MIT License. If you use CodeEdit in your project,
 attribution is appreciated.
 
-This is the first foundation version: a dependency-free custom control with editable
-line storage, gutter, caret movement, selection, clipboard editing, scrolling, and a
-pluggable line highlighter. It is intentionally small enough to install, test, and
-iterate on.
+## Features
+
+- Owner-drawn editor with gutter, line numbers, and theme-aware painting
+  (follows the active VCL style, with an `OnResolveTheme` hook for other
+  skinning systems)
+- Pluggable syntax highlighting with ten bundled languages and correct
+  multi-line constructs (block comments, template literals, triple-quoted
+  strings)
+- Code completion and signature help driven by a provider component
+- Find/replace panel with match-case, whole-word, and regex modes; results
+  stay in sync while editing
+- Multi-caret editing (Ctrl+D / Ctrl+Shift+L), word navigation,
+  indent/unindent, line commenting
+- Breakpoints, execution-line arrow, and error/warning line markers for
+  debugger hosts — design-time editable, 1-based, edit-tracked
+- Undo/redo with typing coalescing that also restores breakpoints,
+  execution line, and the `Modified` flag
+- Minimap, styled scrollbars, bracket matching, occurrence highlighting
+
+## Documentation
+
+- [TCodeEditor reference](docs/editor.md) — properties, methods, events,
+  options, theming, full keyboard table
+- [Highlighters](docs/highlighters.md) — bundled languages, token model,
+  writing your own highlighter, the multi-line state contract
+- [Completion and signature help](docs/completion.md) — provider API and
+  context records
+- [Breakpoints and line markers](docs/breakpoints-markers.md) — the
+  debugger-host surface
 
 ## Units
 
-- `Source\CodeEdit.Editor.pas` contains `TCodeEditor`.
-- `Source\CodeEdit.Completion.pas` contains completion item/provider classes and a keyword provider.
-- `Source\CodeEdit.Highlighter.pas` contains the token model and extensible lexer/highlighter classes for Delphi, JavaScript, SQL, Tungli, Batch (BAT/CMD), PowerShell, INI, YAML, and Python.
-- `Source\CodeEdit.Register.pas` registers the components on the `CodeEdit` palette page.
-- `Packages\CodeEditVcl.dpk` is the package shell.
-- `Samples\VclDemo` contains a small runtime demo.
+- `Source\CodeEdit.Editor.pas` — `TCodeEditor`
+- `Source\CodeEdit.Completion.pas` — completion/signature providers and a
+  keyword provider
+- `Source\CodeEdit.Highlighter.pas` — token model and highlighters for
+  Delphi, JavaScript, SQL, Tungli, Batch (BAT/CMD), PowerShell, INI, YAML,
+  and Python
+- `Source\CodeEdit.Register.pas` — registers everything on the `CodeEdit`
+  palette page
+- `Packages\CodeEditVcl.dpk` — design-time package
+- `Samples\VclDemo`, `Samples\ScrEdit` — demo applications
+- `Tests\TestHighlighterState.dpr` — console regression test for the
+  multi-line tokenizer state
 
-## First Use
+## Quick start
 
-Add the `Source` directory to your Delphi library path or package search path, then
-drop `TCodeEditor` and one highlighter component on a VCL form:
+Install `Packages\CodeEditVcl.dpk` (or just add `Source` to your library
+path), then drop a `TCodeEditor` and a highlighter on a form:
 
 ```pascal
 CodeEditor1.Highlighter := DelphiCodeHighlighter1;
-CodeEditor1.Lines.Text := 'unit Demo;' + sLineBreak + 'interface' + sLineBreak + 'implementation' + sLineBreak + 'end.';
+CodeEditor1.Lines.LoadFromFile('Demo.pas');
 ```
 
-Available highlighters:
-
-- `TDelphiCodeHighlighter`
-- `TJavaScriptCodeHighlighter`
-- `TSqlCodeHighlighter`
-- `TTungliCodeHighlighter` (`.tgl` scripts for `TInterpreter` / `TCalcul`)
-- `TBatchCodeHighlighter` (`.bat`, `.cmd`)
-- `TPowerShellCodeHighlighter` (`.ps1`, `.psm1`)
-- `TIniCodeHighlighter` (`.ini`, `.cfg`)
-- `TYamlCodeHighlighter` (`.yaml`, `.yml`)
-- `TPythonCodeHighlighter` (`.py`)
-
-Completion starts with `TCustomCodeCompletionProvider` and
-`TKeywordCompletionProvider`. Assign `CodeEditor1.CompletionProvider`, handle
-`OnGetCompletions` for callback-driven lists, and call
-`CodeEditor1.TriggerCompletion` or press `Ctrl+Space`.
-
-Signature help uses the same provider. Handle `OnGetSignatureHelp` and return
-one or more signatures; the editor triggers it after `(` or `<`, updates the
-active parameter after commas, and can show it explicitly with
-`CodeEditor1.TriggerSignatureHelp` (`Ctrl+Shift+Space` by default):
+Completion is one event away:
 
 ```pascal
-procedure TMainForm.ProviderGetSignatureHelp(Sender: TObject;
-  const Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems);
-begin
-  if SameText(Context.FunctionName, 'ShowMessage') then
-    Items.AddItem('ShowMessage', ['Msg: string']);
-end;
+CodeEditor1.CompletionProvider := KeywordCompletionProvider1;
+KeywordCompletionProvider1.Keywords.CommaText := 'begin,end,procedure,function';
 ```
 
-Create more languages by deriving from `TCustomWordCodeHighlighter` and overriding
-keyword, comment, string, identifier, and number parsing methods.
+Caret and scroll positions are 0-based; breakpoints, line markers, and
+`ExecutionLine` are 1-based to match the gutter. See the
+[editor reference](docs/editor.md#coordinate-conventions) for the details.
 
-## Find and Replace
-
-Call `CodeEditor1.ShowFind` to open the find bar, or `CodeEditor1.ShowReplace`
-for find-and-replace. The current selection (when it sits on a single line) is
-used as the initial search term, so highlighting a word and opening find gives
-the expected result without retyping. Inside the find edit:
-
-- `Enter` jumps to the next match (`Shift+Enter` for previous).
-- `Esc` closes the panel.
-- Toggles are available for match case, whole word, and regular expressions.
-
-## Editor State API
-
-`ReadOnly` blocks keyboard paste/typing/deletion and public editing calls such
-as `InsertText`. `Modified` is set when the editor changes; host code can reset
-it to `False` after saving.
-
-The public caret/scroll surface is 0-based, matching `TCodeEditor.Caret.Line`:
+## Host integration in five lines
 
 ```pascal
-CodeEditor1.Caret := TCodePosition.Create(12, 4);
-CodeEditor1.ShowLine(12);
-CodeEditor1.TopLine := 12;
-CodeEditor1.LeftColumn := 0;
-CodeEditor1.InsertText('ShowMessage(''Hello'');');
+CodeEditor1.Options.LineCommentPrefix := '--';        // language-specific
+CodeEditor1.OnCaretChange := UpdateStatusBar;          // 0-based position
+CodeEditor1.OnBreakpointsChanged := SyncInterpreter;   // 1-based lines
+CodeEditor1.ExecutionLine := Interpreter.CurrentLine;  // current statement
+CodeEditor1.Modified := False;                         // after saving
 ```
 
-Use `OnCaretChange` and `OnSelectionChange` to update status bars, command
-state, watch expressions, or host-side UI.
+Most settings are published properties, so form storage systems persist the
+editor directly.
 
-## Mouse and Selection
+## Roadmap
 
-- Double-click selects the word at the click position.
-- Drag selects a range; `Shift+Click` extends the existing selection.
-- Mouse wheel scrolls vertically; styled scrollbars accept click-to-page and
-  drag-to-scroll.
-
-## Editing Helpers
-
-`ToggleLineComment`, `CommentSelection`, and `UncommentSelection` operate on the
-current line or selected lines. The prefix defaults to `//` and can be changed
-per host/language:
-
-```pascal
-CodeEditor1.Options.LineCommentPrefix := '--'; // SQL
-CodeEditor1.ToggleLineComment;
-```
-
-`Options.BracketMatching` defaults to `True` and paints a lightweight outline
-around matching `()`, `[]`, `{}`, or `<>` pairs around the caret.
-
-## Host Integration
-
-Most host settings are normal published properties, so existing form storage
-systems can persist the editor directly. For manual persistence, the usual
-surface is:
-
-```pascal
-Ini.WriteBool('Editor', 'Minimap', CodeEditor1.Options.ShowMinimap);
-Ini.WriteInteger('Editor', 'TabSize', CodeEditor1.Options.TabSize);
-Ini.WriteBool('Editor', 'StyledScrollBars', CodeEditor1.StyledScrollBars);
-Ini.WriteInteger('Editor', 'FontSize', CodeEditor1.Font.Size);
-```
-
-## Large Pasting
-
-`Options.MaxPasteBytes` defaults to 64 MB. `Ctrl+V` checks the clipboard text
-payload before asking VCL to materialize it and refuses larger text pastes with a
-warning beep. Set it to `0` to disable the guard, but very large files need a
-future virtual/document-backed storage model rather than the current in-memory
-`TStringList` line store.
-
-## Scrollbars
-
-`StyledScrollBars` defaults to `True` and paints theme-matched scrollbars
-inside the client area. The track uses `GutterBackground` and the thumb is
-brightness-shifted from the track so it stays visible on both light and dark
-themes. Set `StyledScrollBars := False` to fall back to native Windows
-scrollbars.
-
-## Minimap
-
-Set `CodeEditor1.Options.ShowMinimap := True` to show a VS Code-style file map
-on the right-hand side. The minimap uses the active syntax highlighter colors
-where possible, reserves editor layout space automatically, paints fixed-height
-mini rows instead of stretching short files to fill the panel, shows the visible
-viewport, and can be clicked or dragged to scroll through the file.
-
-## Breakpoints
-
-### Toggling a breakpoint
-
-- Click the breakpoint margin — the 16px strip at the left of the gutter
-  (the constant `BreakpointMarginWidth`).
-- Or press `F5` with the caret on the line. (`F5` matches the Delphi IDE; if your
-  host app needs `F5` for "run", remap it — see the note below.)
-
-### What you see
-
-- A breakpoint draws a red dot in the margin.
-- Setting `ExecutionLine` draws an arrow in the margin plus a highlight band
-  across that line, and scrolls the line into view. The arrow is amber when it's
-  just the current statement, and cyan over the red dot when execution is stopped
-  on a line that also has a breakpoint (Delphi-style).
-
-### Driving it from your interpreter
-
-All breakpoint line numbers and `ExecutionLine` are **1-based** — the same number
-shown in the gutter, in the Object Inspector, and returned by `BreakpointLines`.
-(`TCodeEditor.Caret.Line` is 0-based; that's a separate, pre-existing convention,
-so add 1 when feeding it to the breakpoint API.)
-
-```pascal
-// Host / debugger side — push the user's breakpoints into your interpreter:
-for var L in CodeEditor1.BreakpointLines do   // TArray<Integer>, 1-based
-  Interpreter.SetBreakpoint(L);
-
-// When the interpreter stops, show the current statement
-// (set to -1 — or any value < 1 — to clear it):
-CodeEditor1.ExecutionLine := Interpreter.CurrentLine;
-
-// React to the user toggling breakpoints in the editor:
-CodeEditor1.OnBreakpointsChanged := HandleBreakpointsChanged;
-```
-
-API: `ToggleBreakpoint(Line)`, `AddBreakpoint(Line)`, `RemoveBreakpoint(Line)`,
-`ClearBreakpoints`, `HasBreakpoint(Line): Boolean`,
-`BreakpointLines: TArray<Integer>`, the `ExecutionLine` property, and the
-`OnBreakpointsChanged` event — all 1-based.
-
-The breakpoints are also a published `Breakpoints` collection
-(`TCodeBreakpoints` of `TCodeBreakpoint`, each with a 1-based `Line`), so they
-appear in the Object Inspector and can be edited or pre-seeded at design time
-with the standard collection editor; design-time changes repaint the gutter
-immediately. `BreakpointLines` returns the same set as a sorted, de-duplicated
-array; the runtime `Add/Remove/Toggle` helpers keep it in sync.
-(`ExecutionLine` is runtime-only and is not published.)
-
-## Debugger Line Markers
-
-For debugger and compiler surfaces beyond breakpoints, use the published
-`LineMarkers` collection or the helper API:
-
-```pascal
-CodeEditor1.AddLineMarker(12, lmkExecutable);
-CodeEditor1.AddLineMarker(18, lmkError);
-CodeEditor1.ExecutionLine := 18;
-CodeEditor1.ShowLine(18 - 1); // ShowLine is 0-based
-```
-
-Marker lines are 1-based, matching breakpoints and gutter numbers. Supported
-kinds are `lmkExecutable`, `lmkError`, `lmkWarning`, and `lmkInfo`. Markers paint
-a gutter glyph plus a line background band; each marker can override
-`Background`, `Foreground`, and `Text` in the Object Inspector or at runtime.
-
-### Edit tracking and lifetime
-
-Breakpoints and the execution line are tracked by line index and shift to follow
-line insertions and deletions (typing `Enter`, joining lines with
-backspace/delete, deleting a multi-line selection). They are cleared when `Lines`
-is replaced wholesale or `Clear` is called. A breakpoint on a line that gets
-merged into another collapses onto the surviving line; the execution line is
-cleared if its line is deleted.
-
-### Notes / current limitations
-
-- Breakpoints are plain line indices — there is no per-breakpoint enabled/disabled
-  state or condition expression yet.
-- The breakpoint margin width is the fixed constant `BreakpointMarginWidth` (16px);
-  it is not a published property.
-- `F5` is hard-wired as the toggle key. If you need a different key, handle it in
-  the host (`OnKeyDown`) and call `ToggleBreakpoint(CodeEditor1.Caret.Line + 1)`.
-
-## Styling
-
-`TCodeEditor.ThemeMode` defaults to `ctmVclStyle`, so the editor background,
-gutter, text, and selection colors follow the active Delphi VCL style through
-`StyleServices`.
-
-For DevExpress themes, keep the core package free of DevExpress dependencies and
-bridge the active look-and-feel colors from the host application:
-
-```pascal
-procedure TMainForm.CodeEditorResolveTheme(Sender: TObject; Colors: TCodeEditorThemeColors);
-begin
-  // Assign these from your active DevExpress look-and-feel painter/controller.
-  Colors.Background := GetDevExpressEditorBackground;
-  Colors.Text := GetDevExpressEditorText;
-  Colors.GutterBackground := GetDevExpressPanelBackground;
-  Colors.GutterText := GetDevExpressMutedText;
-  Colors.GutterBorder := GetDevExpressBorder;
-  Colors.SelectionBackground := clHighlight;
-  Colors.SelectionText := clHighlightText;
-end;
-```
-
-If a project uses both VCL styles and DevExpress skins, `ctmVclStyle` supplies
-the base palette first and `OnResolveTheme` can override whichever colors should
-come from DevExpress.
-
-## Next Milestones
-
-- Smarter undo grouping for paste, auto-indent, and formatter operations
-- IME and Unicode edge-case handling
-- Multi-line lexer state for block comments, template strings, and conditional compiler sections
-- Virtualized rendering for very large files
-- Minimap, bracket matching, current-line highlight
-- IntelliSense-friendly APIs for diagnostics, completion, and symbol navigation
-- Possible Delphi 7 compatibility branch/pass. The core owner-drawn editor should
-  be portable, but the current code uses modern Delphi features such as unit
-  namespaces, generics, `TArray<T>`, character helpers, `for..in`, Unicode string
-  assumptions, and VCL styles. A D7 pass would likely start with compatibility
-  helpers, typed non-generic containers, manual theme fallback, and ANSI/Unicode
-  scope decisions.
+- Per-breakpoint enabled state and conditions
+- Diff-based undo storage and virtualized rendering for very large files
+- IME composition-window positioning
+- Word wrap
+- Diagnostics API (squiggles) and symbol navigation hooks
+- Possible Delphi 7 compatibility pass (the code currently uses unit
+  namespaces, generics, character helpers, and VCL styles)
 
 ## Changelog
 
