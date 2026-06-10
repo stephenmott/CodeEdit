@@ -5,6 +5,10 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.2.0 — 2026-06-10
+
 ### Added
 - Highlighters for Tungli script (`TTungliCodeHighlighter`), BAT/CMD
   (`TBatchCodeHighlighter`), PowerShell (`TPowerShellCodeHighlighter`),
@@ -128,7 +132,7 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 - Repaired a duplicated, unterminated compiler-options block in
   `CodeEditVcl.dpk` that broke the package build.
 
-## Initial commit
+## 0.1.0 — initial commit
 
 - `TCodeEditor` custom control with editable line storage, gutter, caret,
   selection, clipboard editing, scrolling, and pluggable highlighter.
