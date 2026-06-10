@@ -39,6 +39,7 @@ object Form2: TForm2
       '')
     LineMarkers = <>
     Modified = True
+    Options.LineCommentPrefix = '//'
     TabOrder = 0
     Breakpoints = <
       item
@@ -81,14 +82,18 @@ object Form2: TForm2
       Margins.Right = 6
       Margins.Bottom = 6
       Style = csDropDownList
-      ItemIndex = 0
       TabOrder = 0
-      Text = 'Delphi'
       OnChange = ComboBox1Change
       Items.Strings = (
         'Delphi'
         'Javascript'
-        'SQL')
+        'SQL'
+        'Tungli'
+        'Batch'
+        'PowerShell'
+        'Ini'
+        'Yaml'
+        'Python')
     end
     object CheckBox1: TCheckBox
       Left = 432
@@ -105,21 +110,45 @@ object Form2: TForm2
     end
   end
   object DelphiCodeHighlighter1: TDelphiCodeHighlighter
-    Left = 160
-    Top = 192
+    Left = 256
+    Top = 352
   end
   object JavaScriptCodeHighlighter1: TJavaScriptCodeHighlighter
-    Left = 160
-    Top = 320
+    Left = 256
+    Top = 464
   end
   object SqlCodeHighlighter1: TSqlCodeHighlighter
-    Left = 160
-    Top = 448
+    Left = 256
+    Top = 592
   end
   object KeywordCompletionProvider1: TKeywordCompletionProvider
     OnGetCompletions = KeywordCompletionProvider1GetCompletions
     OnGetSignatureHelp = KeywordCompletionProvider1GetSignatureHelp
-    Left = 352
-    Top = 176
+    Left = 480
+    Top = 128
+  end
+  object PythonCodeHighlighter1: TPythonCodeHighlighter
+    Left = 624
+    Top = 736
+  end
+  object YamlCodeHighlighter1: TYamlCodeHighlighter
+    Left = 624
+    Top = 608
+  end
+  object IniCodeHighlighter1: TIniCodeHighlighter
+    Left = 624
+    Top = 496
+  end
+  object PowerShellCodeHighlighter1: TPowerShellCodeHighlighter
+    Left = 624
+    Top = 368
+  end
+  object BatchCodeHighlighter1: TBatchCodeHighlighter
+    Left = 256
+    Top = 832
+  end
+  object TungliCodeHighlighter1: TTungliCodeHighlighter
+    Left = 256
+    Top = 704
   end
 end

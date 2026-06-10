@@ -6,6 +6,8 @@ procedure Register;
 
 implementation
 
+{$R *.dcr}
+
 uses
   System.Classes,
   CodeEdit.Completion,

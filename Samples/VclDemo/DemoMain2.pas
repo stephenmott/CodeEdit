@@ -175,7 +175,8 @@ CONST
     '' + sLineBreak +
     'foreach ($key in $groups.Keys) {' + sLineBreak +
     '    $count = $groups[$key]' + sLineBreak +
-    '    $pct = if ($total -gt 0) { [math]::Round(100 * $count / $total, 1) } else { 0 }' + sLineBreak +
+    '    $pct = if ($total -gt 0) { [math]::Round(100 * $count / $total, 1) } else { 0 }' + sLineBreak
+      +
     '    "{0,-6} {1,5}  {2,5}%" -f $key, $count, $pct' + sLineBreak +
     '}';
 
@@ -272,7 +273,8 @@ CONST
     '    lines = ["id   name              spend       status"]' + sLineBreak +
     '    for c in customers:' + sLineBreak +
     '        status = LABELS[is_active(c, today)]' + sLineBreak +
-    '        lines.append(f"{c.customer_id:>4} {c.name:<18}{c.total_spend:>10.2f}  {status}")' + sLineBreak +
+    '        lines.append(f"{c.customer_id:>4} {c.name:<18}{c.total_spend:>10.2f}  {status}")' + sLineBreak
+      +
     '    return "\n".join(lines)' + sLineBreak +
     '' + sLineBreak +
     '' + sLineBreak +
@@ -295,6 +297,12 @@ TYPE
     ComboBox1: TComboBox;
     CheckBox1: TCheckBox;
     KeywordCompletionProvider1: TKeywordCompletionProvider;
+    PythonCodeHighlighter1: TPythonCodeHighlighter;
+    YamlCodeHighlighter1: TYamlCodeHighlighter;
+    IniCodeHighlighter1: TIniCodeHighlighter;
+    PowerShellCodeHighlighter1: TPowerShellCodeHighlighter;
+    BatchCodeHighlighter1: TBatchCodeHighlighter;
+    TungliCodeHighlighter1: TTungliCodeHighlighter;
     PROCEDURE FormCreate(Sender: TObject);
     PROCEDURE ComboBox1Change(Sender: TObject);
     PROCEDURE CodeEditor1KeyDown(Sender: TObject; VAR Key: Word;
@@ -357,6 +365,31 @@ BEGIN
         CodeEditor1.Highlighter := SqlCodeHighlighter1;
         CodeEditor1.Lines.Text := cSqlDemoText;
       END;
+    3: BEGIN
+        CodeEditor1.Highlighter := TungliCodeHighlighter1;
+        CodeEditor1.Lines.Text := cTungliDemoText;
+      END;
+    4: BEGIN
+        CodeEditor1.Highlighter := BatchCodeHighlighter1;
+        CodeEditor1.Lines.Text := cBatchDemoText;
+      END;
+    5: BEGIN
+        CodeEditor1.Highlighter := PowerShellCodeHighlighter1;
+        CodeEditor1.Lines.Text := cPowerShellDemoText;
+      END;
+    6: BEGIN
+        CodeEditor1.Highlighter := IniCodeHighlighter1;
+        CodeEditor1.Lines.Text := cIniDemoText;
+      END;
+    7: BEGIN
+        CodeEditor1.Highlighter := YamlCodeHighlighter1;
+        CodeEditor1.Lines.Text := cYamlDemoText;
+      END;
+    8: BEGIN
+        CodeEditor1.Highlighter := PythonCodeHighlighter1;
+        CodeEditor1.Lines.Text := cPythonDemoText;
+      END;
+
   ELSE
     CodeEditor1.Highlighter := DelphiCodeHighlighter1;
     CodeEditor1.Lines.Text := cDelphi;
@@ -380,6 +413,8 @@ BEGIN
   CodeEditor1.AddLineMarker(11, lmkExecutable);
   CodeEditor1.AddLineMarker(12, lmkWarning);
   CodeEditor1.AddLineMarker(13, lmkInfo);
+
+  ComboBox1.ItemIndex := 0;
 END;
 
 PROCEDURE TForm2.GetCompletions(Sender: TObject;
