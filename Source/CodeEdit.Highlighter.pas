@@ -43,26 +43,42 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     function TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray; virtual;
+    // Stateful tokenization for constructs that span lines (block comments,
+    // multi-line strings). StartState is the state the previous line ended in;
+    // 0 means "nothing open". Stateless highlighters ignore it.
+    function TokenizeLineState(const ALine: string; StartState: Integer;
+      out EndState: Integer): TCodeTokenArray; virtual;
     property Styles[Kind: TCodeTokenKind]: TCodeTextStyle read GetStyle write SetStyle;
+  end;
+
+  // A construct that may span lines, e.g. '(*' .. '*)' or '"""' .. '"""'.
+  // Its 1-based index in the registration order is the line state value used
+  // by TokenizeLineState while the construct is open.
+  TCodeMultiLineRange = record
+    StartDelimiter: string;
+    EndDelimiter: string;
+    Kind: TCodeTokenKind;
   end;
 
   TCustomWordCodeHighlighter = class(TCustomCodeHighlighter)
   private
     FKeywords: TDictionary<string, Boolean>;
+    FMultiLineRanges: TList<TCodeMultiLineRange>;
   protected
     procedure AddKeyword(const Value: string);
     procedure AddKeywords(const Values: array of string);
+    procedure AddMultiLineRange(const AStartDelimiter, AEndDelimiter: string;
+      AKind: TCodeTokenKind = tkComment);
     procedure BuildKeywords; virtual;
+    procedure BuildMultiLineRanges; virtual;
     function CaseSensitive: Boolean; virtual;
     function KeywordKey(const Value: string): string;
     function IsKeyword(const Value: string): Boolean; virtual;
     function IsIdentifierStart(Ch: Char): Boolean; virtual;
     function IsIdentifierChar(Ch: Char): Boolean; virtual;
     function IsLineComment(const ALine: string; Index: Integer): Boolean; virtual;
-    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; virtual;
     function IsNumberStart(const ALine: string; Index: Integer): Boolean; virtual;
     function IsStringStart(Ch: Char): Boolean; virtual;
-    function ReadBlockComment(const ALine: string; Index: Integer; const EndDelimiter: string): Integer; virtual;
     function ReadIdentifier(const ALine: string; Index: Integer): Integer; virtual;
     function ReadNumber(const ALine: string; Index: Integer): Integer; virtual;
     function ReadString(const ALine: string; Index: Integer): Integer; virtual;
@@ -71,12 +87,14 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     function TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray; override;
+    function TokenizeLineState(const ALine: string; StartState: Integer;
+      out EndState: Integer): TCodeTokenArray; override;
   end;
 
   TDelphiCodeHighlighter = class(TCustomWordCodeHighlighter)
   protected
     procedure BuildKeywords; override;
-    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
+    procedure BuildMultiLineRanges; override;
     function IsNumberStart(const ALine: string; Index: Integer): Boolean; override;
     function ReadNumber(const ALine: string; Index: Integer): Integer; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
@@ -86,8 +104,8 @@ type
   TJavaScriptCodeHighlighter = class(TCustomWordCodeHighlighter)
   protected
     procedure BuildKeywords; override;
+    procedure BuildMultiLineRanges; override;
     function CaseSensitive: Boolean; override;
-    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadNumber(const ALine: string; Index: Integer): Integer; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
@@ -96,7 +114,7 @@ type
   TSqlCodeHighlighter = class(TCustomWordCodeHighlighter)
   protected
     procedure BuildKeywords; override;
-    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
+    procedure BuildMultiLineRanges; override;
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
@@ -105,7 +123,7 @@ type
   TTungliCodeHighlighter = class(TCustomWordCodeHighlighter)
   protected
     procedure BuildKeywords; override;
-    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
+    procedure BuildMultiLineRanges; override;
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
@@ -122,7 +140,7 @@ type
   TPowerShellCodeHighlighter = class(TCustomWordCodeHighlighter)
   protected
     procedure BuildKeywords; override;
-    function IsBlockCommentStart(const ALine: string; Index: Integer; out EndDelimiter: string): Boolean; override;
+    procedure BuildMultiLineRanges; override;
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
@@ -147,6 +165,7 @@ type
   TPythonCodeHighlighter = class(TCustomWordCodeHighlighter)
   protected
     procedure BuildKeywords; override;
+    procedure BuildMultiLineRanges; override;
     function CaseSensitive: Boolean; override;
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
@@ -158,6 +177,7 @@ implementation
 
 uses
   System.Character,
+  System.StrUtils,
   System.SysUtils;
 
 function MakeToken(AStart, ALength: Integer; AKind: TCodeTokenKind): TCodeToken;
@@ -218,6 +238,14 @@ begin
   Result := TokenArrayOf(MakeToken(1, Length(ALine), tkText));
 end;
 
+function TCustomCodeHighlighter.TokenizeLineState(const ALine: string; StartState: Integer;
+  out EndState: Integer): TCodeTokenArray;
+begin
+  // Stateless default: highlighters that only override TokenizeLine keep working.
+  EndState := 0;
+  Result := TokenizeLine(ALine, 0);
+end;
+
 function TCustomCodeHighlighter.GetStyle(Kind: TCodeTokenKind): TCodeTextStyle;
 begin
   Result := FStyles[Kind];
@@ -232,13 +260,31 @@ constructor TCustomWordCodeHighlighter.Create(AOwner: TComponent);
 begin
   inherited;
   FKeywords := TDictionary<string, Boolean>.Create;
+  FMultiLineRanges := TList<TCodeMultiLineRange>.Create;
   BuildKeywords;
+  BuildMultiLineRanges;
 end;
 
 destructor TCustomWordCodeHighlighter.Destroy;
 begin
+  FMultiLineRanges.Free;
   FKeywords.Free;
   inherited;
+end;
+
+procedure TCustomWordCodeHighlighter.AddMultiLineRange(const AStartDelimiter, AEndDelimiter: string;
+  AKind: TCodeTokenKind);
+var
+  Range: TCodeMultiLineRange;
+begin
+  Range.StartDelimiter := AStartDelimiter;
+  Range.EndDelimiter := AEndDelimiter;
+  Range.Kind := AKind;
+  FMultiLineRanges.Add(Range);
+end;
+
+procedure TCustomWordCodeHighlighter.BuildMultiLineRanges;
+begin
 end;
 
 procedure TCustomWordCodeHighlighter.AddKeyword(const Value: string);
@@ -291,13 +337,6 @@ begin
   Result := StartsTextAt(ALine, Index, '//', True);
 end;
 
-function TCustomWordCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
-  out EndDelimiter: string): Boolean;
-begin
-  EndDelimiter := '';
-  Result := False;
-end;
-
 function TCustomWordCodeHighlighter.IsNumberStart(const ALine: string; Index: Integer): Boolean;
 begin
   Result := ALine[Index].IsDigit;
@@ -306,18 +345,6 @@ end;
 function TCustomWordCodeHighlighter.IsStringStart(Ch: Char): Boolean;
 begin
   Result := Ch = '''';
-end;
-
-function TCustomWordCodeHighlighter.ReadBlockComment(const ALine: string; Index: Integer;
-  const EndDelimiter: string): Integer;
-begin
-  Result := Index + Length(EndDelimiter);
-  while (Result <= Length(ALine)) and
-    not StartsTextAt(ALine, Result, EndDelimiter, True) do
-    Inc(Result);
-
-  if Result <= Length(ALine) then
-    Inc(Result, Length(EndDelimiter));
 end;
 
 function TCustomWordCodeHighlighter.ReadIdentifier(const ALine: string; Index: Integer): Integer;
@@ -368,11 +395,21 @@ end;
 
 function TCustomWordCodeHighlighter.TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray;
 var
+  EndState: Integer;
+begin
+  Result := TokenizeLineState(ALine, 0, EndState);
+end;
+
+function TCustomWordCodeHighlighter.TokenizeLineState(const ALine: string; StartState: Integer;
+  out EndState: Integer): TCodeTokenArray;
+var
   Tokens: TList<TCodeToken>;
   I: Integer;
   Start: Integer;
-  EndDelimiter: string;
   Text: string;
+  RangeIndex: Integer;
+  CloseAt: Integer;
+  Range: TCodeMultiLineRange;
 
   procedure AddToken(AStart, ALength: Integer; AKind: TCodeTokenKind);
   begin
@@ -380,10 +417,45 @@ var
       Tokens.Add(MakeToken(AStart, ALength, AKind));
   end;
 
+  function TryRangeStart(Index: Integer; out FoundRange: Integer): Boolean;
+  var
+    R: Integer;
+  begin
+    for R := 0 to FMultiLineRanges.Count - 1 do
+      if StartsTextAt(ALine, Index, FMultiLineRanges[R].StartDelimiter, True) then
+      begin
+        FoundRange := R;
+        Exit(True);
+      end;
+    FoundRange := -1;
+    Result := False;
+  end;
+
 begin
+  EndState := 0;
   Tokens := TList<TCodeToken>.Create;
   try
     I := 1;
+
+    // A multi-line construct left open by the previous line consumes this line
+    // until its end delimiter (or to the end of the line, keeping the state).
+    if (StartState >= 1) and (StartState <= FMultiLineRanges.Count) then
+    begin
+      Range := FMultiLineRanges[StartState - 1];
+      CloseAt := PosEx(Range.EndDelimiter, ALine, 1);
+      if CloseAt = 0 then
+      begin
+        AddToken(1, Length(ALine), Range.Kind);
+        EndState := StartState;
+        I := Length(ALine) + 1;
+      end
+      else
+      begin
+        I := CloseAt + Length(Range.EndDelimiter);
+        AddToken(1, I - 1, Range.Kind);
+      end;
+    end;
+
     while I <= Length(ALine) do
     begin
       if ALine[I].IsWhiteSpace then
@@ -399,11 +471,19 @@ begin
         AddToken(I, Length(ALine) - I + 1, tkComment);
         Break;
       end
-      else if IsBlockCommentStart(ALine, I, EndDelimiter) then
+      else if TryRangeStart(I, RangeIndex) then
       begin
+        Range := FMultiLineRanges[RangeIndex];
         Start := I;
-        I := ReadBlockComment(ALine, I, EndDelimiter);
-        AddToken(Start, I - Start, tkComment);
+        CloseAt := PosEx(Range.EndDelimiter, ALine, I + Length(Range.StartDelimiter));
+        if CloseAt = 0 then
+        begin
+          AddToken(Start, Length(ALine) - Start + 1, Range.Kind);
+          EndState := RangeIndex + 1;
+          Break;
+        end;
+        I := CloseAt + Length(Range.EndDelimiter);
+        AddToken(Start, I - Start, Range.Kind);
       end
       else if IsStringStart(ALine[I]) then
       begin
@@ -455,23 +535,10 @@ begin
   ]);
 end;
 
-function TDelphiCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
-  out EndDelimiter: string): Boolean;
+procedure TDelphiCodeHighlighter.BuildMultiLineRanges;
 begin
-  if StartsTextAt(ALine, Index, '(*', True) then
-  begin
-    EndDelimiter := '*)';
-    Exit(True);
-  end;
-
-  if StartsTextAt(ALine, Index, '{', True) then
-  begin
-    EndDelimiter := '}';
-    Exit(True);
-  end;
-
-  EndDelimiter := '';
-  Result := False;
+  AddMultiLineRange('(*', '*)');
+  AddMultiLineRange('{', '}');
 end;
 
 function TDelphiCodeHighlighter.IsNumberStart(const ALine: string; Index: Integer): Boolean;
@@ -537,22 +604,16 @@ begin
   Result := True;
 end;
 
-function TJavaScriptCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
-  out EndDelimiter: string): Boolean;
+procedure TJavaScriptCodeHighlighter.BuildMultiLineRanges;
 begin
-  if StartsTextAt(ALine, Index, '/*', True) then
-  begin
-    EndDelimiter := '*/';
-    Exit(True);
-  end;
-
-  EndDelimiter := '';
-  Result := False;
+  AddMultiLineRange('/*', '*/');
+  // Template literals may span lines.
+  AddMultiLineRange('`', '`', tkString);
 end;
 
 function TJavaScriptCodeHighlighter.IsStringStart(Ch: Char): Boolean;
 begin
-  Result := CharInSet(Ch, ['''', '"', '`']);
+  Result := CharInSet(Ch, ['''', '"']);
 end;
 
 function TJavaScriptCodeHighlighter.ReadNumber(const ALine: string; Index: Integer): Integer;
@@ -602,17 +663,9 @@ begin
   ]);
 end;
 
-function TSqlCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
-  out EndDelimiter: string): Boolean;
+procedure TSqlCodeHighlighter.BuildMultiLineRanges;
 begin
-  if StartsTextAt(ALine, Index, '/*', True) then
-  begin
-    EndDelimiter := '*/';
-    Exit(True);
-  end;
-
-  EndDelimiter := '';
-  Result := False;
+  AddMultiLineRange('/*', '*/');
 end;
 
 function TSqlCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
@@ -666,17 +719,9 @@ begin
   ]);
 end;
 
-function TTungliCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
-  out EndDelimiter: string): Boolean;
+procedure TTungliCodeHighlighter.BuildMultiLineRanges;
 begin
-  if StartsTextAt(ALine, Index, '/*', True) then
-  begin
-    EndDelimiter := '*/';
-    Exit(True);
-  end;
-
-  EndDelimiter := '';
-  Result := False;
+  AddMultiLineRange('/*', '*/');
 end;
 
 function TTungliCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
@@ -764,17 +809,9 @@ begin
   ]);
 end;
 
-function TPowerShellCodeHighlighter.IsBlockCommentStart(const ALine: string; Index: Integer;
-  out EndDelimiter: string): Boolean;
+procedure TPowerShellCodeHighlighter.BuildMultiLineRanges;
 begin
-  if StartsTextAt(ALine, Index, '<#', True) then
-  begin
-    EndDelimiter := '#>';
-    Exit(True);
-  end;
-
-  EndDelimiter := '';
-  Result := False;
+  AddMultiLineRange('<#', '#>');
 end;
 
 function TPowerShellCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
@@ -939,6 +976,12 @@ begin
   ]);
 end;
 
+procedure TPythonCodeHighlighter.BuildMultiLineRanges;
+begin
+  AddMultiLineRange('"""', '"""', tkString);
+  AddMultiLineRange('''''''', '''''''', tkString);
+end;
+
 function TPythonCodeHighlighter.CaseSensitive: Boolean;
 begin
   Result := True;
@@ -966,29 +1009,11 @@ end;
 function TPythonCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
 var
   Quote: Char;
-  Triple: Boolean;
   Escaped: Boolean;
 begin
+  // Triple-quoted strings are handled by the multi-line ranges; this only
+  // sees single-quoted forms.
   Quote := ALine[Index];
-  Triple := (Index + 2 <= Length(ALine)) and
-            (ALine[Index + 1] = Quote) and (ALine[Index + 2] = Quote);
-  if Triple then
-  begin
-    Result := Index + 3;
-    while Result + 2 <= Length(ALine) do
-    begin
-      if (ALine[Result] = Quote) and (ALine[Result + 1] = Quote) and
-         (ALine[Result + 2] = Quote) then
-      begin
-        Inc(Result, 3);
-        Exit;
-      end;
-      Inc(Result);
-    end;
-    Result := Length(ALine) + 1;
-    Exit;
-  end;
-
   Escaped := False;
   Result := Index + 1;
   while Result <= Length(ALine) do

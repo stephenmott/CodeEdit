@@ -66,7 +66,6 @@ type
     FThemeSyntaxColors: Boolean;
     FShowGutter: Boolean;
     FTabSize: Integer;
-    FWordWrap: Boolean;
     FOnChange: TNotifyEvent;
     procedure SetBracketMatching(Value: Boolean);
     procedure SetLineCommentPrefix(const Value: string);
@@ -75,7 +74,6 @@ type
     procedure SetThemeSyntaxColors(Value: Boolean);
     procedure SetShowGutter(Value: Boolean);
     procedure SetTabSize(Value: Integer);
-    procedure SetWordWrap(Value: Boolean);
   protected
     procedure Changed;
   public
@@ -89,7 +87,6 @@ type
     property ShowMinimap: Boolean read FShowMinimap write SetShowMinimap default False;
     property TabSize: Integer read FTabSize write SetTabSize default 2;
     property ThemeSyntaxColors: Boolean read FThemeSyntaxColors write SetThemeSyntaxColors default True;
-    property WordWrap: Boolean read FWordWrap write SetWordWrap default False;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
   end;
 
@@ -103,6 +100,7 @@ type
   public
     BeforeText: string;
     AfterText: string;
+    BeforeModified: Boolean;
     BeforeCaret: TCodePosition;
     AfterCaret: TCodePosition;
     BeforeAnchor: TCodePosition;
@@ -126,11 +124,36 @@ type
     Caret: TCodePosition;
   end;
 
+  // Cached tokenization of one line. Entries are only trusted while both Text
+  // and StartState still match, so the cache never needs precise invalidation.
+  TCodeLineTokensEntry = record
+    Text: string;
+    StartState: Integer;
+    EndState: Integer;
+    Tokens: TCodeTokenArray;
+  end;
+
   TCodeEditorCaretChangeEvent = procedure(Sender: TObject; const Caret: TCodePosition) of object;
   TCodeEditorSelectionChangeEvent = procedure(Sender: TObject; const SelectionStart,
     SelectionEnd: TCodePosition) of object;
 
   TCodeEditor = class;
+
+  TCodeEditorCommand = (
+    eccUndo,
+    eccRedo,
+    eccCut,
+    eccCopy,
+    eccPaste,
+    eccSelectAll,
+    eccFind,
+    eccReplace,
+    eccToggleLineComment,
+    eccCommentSelection,
+    eccUncommentSelection,
+    eccTriggerCompletion,
+    eccTriggerSignatureHelp
+  );
 
   TCodeLineMarkerKind = (lmkExecutable, lmkError, lmkWarning, lmkInfo);
 
@@ -226,6 +249,7 @@ type
     FCompletionList: TListBox;
     FCompletionItems: TCodeCompletionItems;
     FCompletionStart: TCodePosition;
+    FCompletionEnd: TCodePosition;
     FSignatureForm: TForm;
     FSignatureLabel: TLabel;
     FSignatureItems: TCodeSignatureItems;
@@ -246,6 +270,7 @@ type
     FSearchMatches: TList<TCodeSearchMatch>;
     FSearchIndex: Integer;
     FSearchExpanded: Boolean;
+    FSearchUpdating: Boolean;
     FStyledScrollBars: Boolean;
     FScrollBarDragging: Boolean;
     FHScrollBarDragging: Boolean;
@@ -263,6 +288,12 @@ type
     FBreakpoints: TCodeBreakpoints;
     FLineMarkers: TCodeLineMarkers;
     FExecutionLine: Integer;
+    FDesiredColumn: Integer;
+    FMaxLineLength: Integer;
+    FMaxLineLengthValid: Boolean;
+    FPaintTheme: TCodeEditorThemeColors;
+    FLineTokenCache: TDictionary<Integer, TCodeLineTokensEntry>;
+    FStateChainValid: Integer;
     FOnChange: TNotifyEvent;
     FOnCaretChange: TCodeEditorCaretChangeEvent;
     FOnResolveTheme: TCodeEditorResolveThemeEvent;
@@ -348,6 +379,8 @@ type
     function CanContinueTypingUndo(const Value: string): Boolean;
     procedure InsertTypedText(const Value: string);
     procedure PasteFromClipboard;
+    procedure CopyToClipboard;
+    procedure CutToClipboard;
     procedure CreateCompletionPopup;
     procedure PopulateCompletionPopup;
     procedure ShowCompletion(TriggerChar: Char; ExplicitRequest: Boolean);
@@ -390,15 +423,25 @@ type
       out NewCaret: TCodePosition);
     function PositionBefore(const Position: TCodePosition): TCodePosition;
     function PositionAfter(const Position: TCodePosition): TCodePosition;
+    function CollectSelectionRanges: TArray<TCodeSelectionRange>;
+    procedure ApplyRangeEdits(var Ranges: TArray<TCodeSelectionRange>; const Value: string);
     procedure ReplaceAllSelections(const Value: string);
     procedure DeleteAllSelections(DeletePrevious: Boolean);
     procedure EnsureCaretVisible;
     procedure UpdateCaret;
     procedure UpdateMetrics;
+    procedure UpdateGutterWidth;
     procedure UpdateScrollBars;
+    procedure EnsureLineStates(UpToLine: Integer);
+    function LineTokens(ALineIndex: Integer): TCodeTokenArray;
+    function WindowInPopups(Wnd: HWND): Boolean;
     function MovePositionForKey(const Position: TCodePosition; Key: Word): TCodePosition;
     procedure MoveMultipleCarets(Key: Word; Shift: TShiftState);
-    procedure MoveCaret(const Position: TCodePosition; Shift: TShiftState);
+    procedure MoveCaret(const Position: TCodePosition; Shift: TShiftState;
+      PreserveDesiredColumn: Boolean = False);
+    procedure MoveCaretVertically(DeltaLines: Integer; Shift: TShiftState);
+    function PrevWordPosition(const Position: TCodePosition): TCodePosition;
+    function NextWordPosition(const Position: TCodePosition): TCodePosition;
     procedure SelectWordAtCaret;
     function LineAtPoint(const Point: TPoint): Integer;
     procedure SetExecutionLine(Value: Integer);
@@ -416,16 +459,18 @@ type
     procedure PaintText;
     procedure PaintMinimap;
     procedure PaintStyledScrollBars;
-    procedure PaintOccurrenceHighlightsLine(ALineIndex, Y: Integer; const LineText: string);
+    procedure PaintOccurrenceHighlightsLine(ALineIndex, Y: Integer; const LineText, Needle: string);
     procedure PaintSelectionLine(ALineIndex, Y: Integer; const LineText: string);
     procedure PaintMultipleCaretsLine(ALineIndex, Y: Integer);
-    procedure PaintBracketMatchesLine(ALineIndex, Y: Integer);
-    procedure PaintTokenText(const LineText: string; X, Y: Integer; ALineIndex: Integer);
+    procedure PaintBracketMatchesLine(ALineIndex, Y: Integer; const OpenPos, ClosePos: TCodePosition);
+    procedure PaintLineTokens(ALineIndex, X, Y: Integer; const LineText: string; ForcedColor: TColor);
+    procedure PaintSelectedTextLine(ALineIndex, X, Y: Integer; const LineText: string);
     procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
     procedure CMStyleChanged(var Message: TMessage); message CM_STYLECHANGED;
     procedure WMGetDlgCode(var Message: TWMGetDlgCode); message WM_GETDLGCODE;
     procedure WMHScroll(var Message: TWMHScroll); message WM_HSCROLL;
     procedure WMMouseWheel(var Message: TWMMouseWheel); message WM_MOUSEWHEEL;
+    procedure WMPaste(var Message: TWMPaste); message WM_PASTE;
     procedure WMSetFocus(var Message: TWMSetFocus); message WM_SETFOCUS;
     procedure WMKillFocus(var Message: TWMKillFocus); message WM_KILLFOCUS;
     procedure WMSize(var Message: TWMSize); message WM_SIZE;
@@ -439,6 +484,7 @@ type
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
+    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
     procedure Paint; override;
     procedure Resize; override;
     procedure Change; virtual;
@@ -450,6 +496,7 @@ type
     procedure Undo;
     procedure Redo;
     procedure ClearUndo;
+    procedure ExecuteCommand(Command: TCodeEditorCommand);
     procedure TriggerCompletion;
     procedure TriggerSignatureHelp;
     procedure ShowFind;
@@ -458,6 +505,8 @@ type
     procedure CommentSelection;
     procedure UncommentSelection;
     procedure ToggleLineComment;
+    procedure IndentSelection;
+    procedure UnindentSelection;
     procedure AddNextSelectionOccurrence;
     procedure SelectAllSelectionOccurrences;
     procedure ClearMultipleSelections;
@@ -522,6 +571,7 @@ uses
   System.Character,
   System.Math,
   System.RegularExpressions,
+  System.StrUtils,
   System.SysUtils,
   Vcl.Clipbrd,
   Vcl.Themes;
@@ -648,7 +698,6 @@ begin
   FMaxPasteBytes := DefaultMaxPasteBytes;
   FThemeSyntaxColors := True;
   FTabSize := 2;
-  FWordWrap := False;
 end;
 
 procedure TCodeEditorOptions.Changed;
@@ -668,7 +717,6 @@ begin
     FMaxPasteBytes := TCodeEditorOptions(Source).MaxPasteBytes;
     FTabSize := TCodeEditorOptions(Source).TabSize;
     FThemeSyntaxColors := TCodeEditorOptions(Source).ThemeSyntaxColors;
-    FWordWrap := TCodeEditorOptions(Source).WordWrap;
     Changed;
   end
   else
@@ -736,15 +784,6 @@ begin
   if FTabSize <> Value then
   begin
     FTabSize := Value;
-    Changed;
-  end;
-end;
-
-procedure TCodeEditorOptions.SetWordWrap(Value: Boolean);
-begin
-  if FWordWrap <> Value then
-  begin
-    FWordWrap := Value;
     Changed;
   end;
 end;
@@ -1048,7 +1087,9 @@ begin
   FSearchIndex := -1;
   FBreakpoints := TCodeBreakpoints.Create(Self);
   FLineMarkers := TCodeLineMarkers.Create(Self);
+  FLineTokenCache := TDictionary<Integer, TCodeLineTokensEntry>.Create;
   FExecutionLine := -1;
+  FDesiredColumn := -1;
   FMaxUndo := 1024;
   FModified := False;
   FReadOnly := False;
@@ -1064,8 +1105,12 @@ end;
 
 destructor TCodeEditor.Destroy;
 begin
+  // Cancel rather than finish: committing would touch FBreakpoints/FLineMarkers,
+  // and there is no point keeping an undo entry during destruction.
+  CancelUndoGroup;
   HideCompletion;
   HideSignatureHelp;
+  FCompletionForm.Free;
   FCompletionItems.Free;
   FSignatureItems.Free;
   FSignatureForm.Free;
@@ -1073,7 +1118,7 @@ begin
   FSelections.Free;
   FBreakpoints.Free;
   FLineMarkers.Free;
-  FinishUndoGroup;
+  FLineTokenCache.Free;
   ClearUndo;
   FRedoStack.Free;
   FUndoStack.Free;
@@ -1132,6 +1177,7 @@ end;
 procedure TCodeEditor.WMHScroll(var Message: TWMHScroll);
 var
   NewLeft: Integer;
+  Info: TScrollInfo;
 begin
   inherited;
   NewLeft := FLeftColumn;
@@ -1140,7 +1186,17 @@ begin
     SB_LINERIGHT: Inc(NewLeft);
     SB_PAGELEFT: Dec(NewLeft, VisibleColumnCount);
     SB_PAGERIGHT: Inc(NewLeft, VisibleColumnCount);
-    SB_THUMBPOSITION, SB_THUMBTRACK: NewLeft := Message.Pos;
+    SB_THUMBPOSITION, SB_THUMBTRACK:
+      begin
+        // Message.Pos is 16-bit; SIF_TRACKPOS gives the full 32-bit position.
+        FillChar(Info, SizeOf(Info), 0);
+        Info.cbSize := SizeOf(Info);
+        Info.fMask := SIF_TRACKPOS;
+        if GetScrollInfo(Handle, SB_HORZ, Info) then
+          NewLeft := Info.nTrackPos
+        else
+          NewLeft := Message.Pos;
+      end;
   end;
 
   NewLeft := EnsureRange(NewLeft, 0, Max(0, MaxLineLength - VisibleColumnCount + 1));
@@ -1172,10 +1228,35 @@ begin
   UpdateCaret;
 end;
 
+function TCodeEditor.WindowInPopups(Wnd: HWND): Boolean;
+
+  function InForm(Form: TForm): Boolean;
+  begin
+    Result := Assigned(Form) and Form.HandleAllocated and
+      ((Wnd = Form.Handle) or IsChild(Form.Handle, Wnd));
+  end;
+
+begin
+  Result := InForm(FCompletionForm) or InForm(FSignatureForm);
+end;
+
 procedure TCodeEditor.WMKillFocus(var Message: TWMKillFocus);
 begin
   HideCaret(Handle);
+  if not WindowInPopups(Message.FocusedWnd) then
+  begin
+    HideCompletion;
+    HideSignatureHelp;
+  end;
   inherited;
+end;
+
+procedure TCodeEditor.WMPaste(var Message: TWMPaste);
+begin
+  HideCompletion;
+  HideSignatureHelp;
+  PasteFromClipboard;
+  Message.Result := 0;
 end;
 
 procedure TCodeEditor.WMMouseWheel(var Message: TWMMouseWheel);
@@ -1183,6 +1264,8 @@ var
   DeltaLines: Integer;
   NewTop: Integer;
 begin
+  HideCompletion;
+  HideSignatureHelp;
   DeltaLines := Mouse.WheelScrollLines * -Sign(Message.WheelDelta);
   NewTop := EnsureRange(FTopLine + DeltaLines, 0, Max(0, FLines.Count - VisibleLineCount));
   if NewTop = FTopLine then
@@ -1195,6 +1278,7 @@ end;
 procedure TCodeEditor.WMVScroll(var Message: TWMVScroll);
 var
   NewTop: Integer;
+  Info: TScrollInfo;
 begin
   inherited;
   NewTop := FTopLine;
@@ -1203,7 +1287,17 @@ begin
     SB_LINEDOWN: Inc(NewTop);
     SB_PAGEUP: Dec(NewTop, VisibleLineCount);
     SB_PAGEDOWN: Inc(NewTop, VisibleLineCount);
-    SB_THUMBPOSITION, SB_THUMBTRACK: NewTop := Message.Pos;
+    SB_THUMBPOSITION, SB_THUMBTRACK:
+      begin
+        // Message.Pos is 16-bit; SIF_TRACKPOS gives the full 32-bit position.
+        FillChar(Info, SizeOf(Info), 0);
+        Info.cbSize := SizeOf(Info);
+        Info.fMask := SIF_TRACKPOS;
+        if GetScrollInfo(Handle, SB_VERT, Info) then
+          NewTop := Info.nTrackPos
+        else
+          NewTop := Message.Pos;
+      end;
   end;
 
   NewTop := EnsureRange(NewTop, 0, Max(0, FLines.Count - VisibleLineCount));
@@ -1219,6 +1313,21 @@ procedure TCodeEditor.UpdateMetrics;
 var
   MeasureBitmap: Vcl.Graphics.TBitmap;
   MeasureCanvas: TCanvas;
+begin
+  MeasureBitmap := Vcl.Graphics.TBitmap.Create;
+  MeasureCanvas := MeasureBitmap.Canvas;
+  try
+    MeasureCanvas.Font.Assign(Font);
+    FLineHeight := Max(1, MeasureCanvas.TextHeight('Wg') + 2);
+    FCharWidth := Max(1, MeasureCanvas.TextWidth('M'));
+  finally
+    MeasureBitmap.Free;
+  end;
+  UpdateGutterWidth;
+end;
+
+procedure TCodeEditor.UpdateGutterWidth;
+var
   LineCount: Integer;
   ShowGutter: Boolean;
 begin
@@ -1226,26 +1335,13 @@ begin
   if Assigned(FLines) then
     LineCount := Max(1, FLines.Count);
   ShowGutter := not Assigned(FOptions) or FOptions.ShowGutter;
-
-  MeasureBitmap := Vcl.Graphics.TBitmap.Create;
-  MeasureCanvas := MeasureBitmap.Canvas;
-
-  try
-    MeasureCanvas.Font.Assign(Font);
-    FLineHeight := Max(1, MeasureCanvas.TextHeight('Wg') + 2);
-    FCharWidth := Max(1, MeasureCanvas.TextWidth('M'));
-    FGutterWidth := IfThen(ShowGutter,
-      Max(MinGutterWidth, MeasureCanvas.TextWidth(IntToStr(LineCount)) + 18) + BreakpointMarginWidth, 0);
-  finally
-    MeasureBitmap.Free;
-  end;
+  FGutterWidth := IfThen(ShowGutter,
+    Max(MinGutterWidth, FCharWidth * Length(IntToStr(LineCount)) + 18) + BreakpointMarginWidth, 0);
 end;
 
 procedure TCodeEditor.UpdateScrollBars;
 var
   Info: TScrollInfo;
-  MaxLineLength: Integer;
-  Line: string;
 begin
   if not HandleAllocated then
     Exit;
@@ -1256,10 +1352,6 @@ begin
     ShowScrollBar(Handle, SB_HORZ, False);
     Exit;
   end;
-
-  MaxLineLength := 0;
-  for Line in FLines do
-    MaxLineLength := Max(MaxLineLength, Length(Line));
 
   FillChar(Info, SizeOf(Info), 0);
   Info.cbSize := SizeOf(Info);
@@ -1407,10 +1499,15 @@ function TCodeEditor.MaxLineLength: Integer;
 var
   Line: string;
 begin
-  Result := 0;
-  for Line in FLines do
-    if Length(Line) > Result then
-      Result := Length(Line);
+  if not FMaxLineLengthValid then
+  begin
+    FMaxLineLength := 0;
+    for Line in FLines do
+      if Length(Line) > FMaxLineLength then
+        FMaxLineLength := Length(Line);
+    FMaxLineLengthValid := True;
+  end;
+  Result := FMaxLineLength;
 end;
 
 function TCodeEditor.StyledVerticalScrollRect: TRect;
@@ -1477,6 +1574,57 @@ begin
   Result.Bottom := Track.Bottom;
 end;
 
+procedure TCodeEditor.EnsureLineStates(UpToLine: Integer);
+var
+  I: Integer;
+  State: Integer;
+  Entry: TCodeLineTokensEntry;
+begin
+  if not Assigned(FHighlighter) then
+    Exit;
+
+  UpToLine := Min(UpToLine, FLines.Count - 1);
+  if FStateChainValid > UpToLine then
+    Exit;
+
+  // Resume from the last verified line. Lines whose text and incoming state
+  // are unchanged reuse their cached tokens, so revalidation after an edit
+  // only re-tokenizes the changed lines plus any lines whose state flipped.
+  State := 0;
+  if (FStateChainValid > 0) and FLineTokenCache.TryGetValue(FStateChainValid - 1, Entry) then
+    State := Entry.EndState;
+
+  for I := FStateChainValid to UpToLine do
+  begin
+    if FLineTokenCache.TryGetValue(I, Entry) and (Entry.Text = FLines[I]) and
+      (Entry.StartState = State) then
+      State := Entry.EndState
+    else
+    begin
+      Entry.Text := FLines[I];
+      Entry.StartState := State;
+      Entry.Tokens := FHighlighter.TokenizeLineState(Entry.Text, State, Entry.EndState);
+      FLineTokenCache.AddOrSetValue(I, Entry);
+      State := Entry.EndState;
+    end;
+  end;
+  FStateChainValid := UpToLine + 1;
+end;
+
+function TCodeEditor.LineTokens(ALineIndex: Integer): TCodeTokenArray;
+var
+  Entry: TCodeLineTokensEntry;
+begin
+  if not Assigned(FHighlighter) or (ALineIndex < 0) or (ALineIndex >= FLines.Count) then
+    Exit(nil);
+
+  EnsureLineStates(ALineIndex);
+  if FLineTokenCache.TryGetValue(ALineIndex, Entry) then
+    Result := Entry.Tokens
+  else
+    Result := nil;
+end;
+
 function TCodeEditor.VisibleLineCount: Integer;
 begin
   Result := Max(1, ClientTextRect.Height div FLineHeight);
@@ -1510,6 +1658,27 @@ function TCodeEditor.NormalizePosition(const Position: TCodePosition): TCodePosi
 begin
   Result.Line := EnsureRange(Position.Line, 0, Max(0, FLines.Count - 1));
   Result.Column := EnsureRange(Position.Column, 0, Length(FLines[Result.Line]));
+end;
+
+function IsWordChar(Ch: Char): Boolean;
+begin
+  Result := Ch.IsLetterOrDigit or (Ch = '_');
+end;
+
+// Maps a 1-based marker line through an insertion (Delta > 0) or deletion
+// (Delta < 0) of Abs(Delta) lines after AfterLine. Lines inside a deleted
+// region collapse onto AfterLine.
+function RemapLineAfterEdit(L, AfterLine, Delta: Integer): Integer;
+begin
+  Result := L;
+  if L <= AfterLine then
+    Exit;
+  if Delta >= 0 then
+    Result := L + Delta
+  else if L <= AfterLine - Delta then
+    Result := AfterLine
+  else
+    Result := L + Delta;
 end;
 
 function ColorLuminance(Color: TColor): Integer;
@@ -1649,8 +1818,10 @@ end;
 
 function TCodeEditor.MatchingBracketPosition(out OpenPos, ClosePos: TCodePosition): Boolean;
 const
-  OpenBrackets = '([{<';
-  CloseBrackets = ')]}>';
+  // Angle brackets are deliberately excluded: matching them in ordinary code
+  // pairs every < comparison operator with an unrelated >.
+  OpenBrackets = '([{';
+  CloseBrackets = ')]}';
 var
   Probe: TCodePosition;
   Ch: Char;
@@ -1883,12 +2054,6 @@ function TCodeEditor.IsWholeWordMatch(const LineText: string; Column, MatchLengt
 var
   BeforeChar: Char;
   AfterChar: Char;
-
-  function IsWordChar(Ch: Char): Boolean;
-  begin
-    Result := Ch.IsLetterOrDigit or (Ch = '_');
-  end;
-
 begin
   BeforeChar := #0;
   AfterChar := #0;
@@ -1951,6 +2116,7 @@ function TCodeEditor.CaptureUndoState: TCodeUndoItem;
 begin
   Result := TCodeUndoItem.Create;
   Result.BeforeText := CurrentTextSnapshot;
+  Result.BeforeModified := FModified;
   Result.BeforeCaret := FCaret;
   Result.BeforeAnchor := FAnchor;
   Result.BeforeBreakpoints := BreakpointLines;
@@ -2170,6 +2336,37 @@ begin
   InsertText(Text);
 end;
 
+procedure TCodeEditor.CopyToClipboard;
+begin
+  // Don't clobber the clipboard when there is nothing selected.
+  if HasSelection then
+    Clipboard.AsText := SelectedText;
+end;
+
+procedure TCodeEditor.CutToClipboard;
+var
+  UndoItem: TCodeUndoItem;
+begin
+  if not HasSelection then
+    Exit;
+
+  Clipboard.AsText := SelectedText;
+  if FReadOnly then
+    Exit;
+
+  if HasMultipleSelections then
+  begin
+    ReplaceAllSelections('');
+    Exit;
+  end;
+
+  FinishUndoGroup;
+  UndoItem := CaptureUndoState;
+  DeleteSelection;
+  LinesChanged(Self);
+  CommitUndoState(UndoItem);
+end;
+
 procedure TCodeEditor.Undo;
 var
   Item: TCodeUndoItem;
@@ -2181,7 +2378,8 @@ begin
   Item := FUndoStack.Pop;
   RestoreUndoState(Item.BeforeText, Item.BeforeCaret, Item.BeforeAnchor,
     Item.BeforeBreakpoints, Item.BeforeExecutionLine);
-  DoEditStateChanged;
+  // Undoing back to the pre-edit state restores the pre-edit Modified flag.
+  FModified := Item.BeforeModified;
   Change;
   PushUndoItem(FRedoStack, Item);
 end;
@@ -2197,7 +2395,7 @@ begin
   Item := FRedoStack.Pop;
   RestoreUndoState(Item.AfterText, Item.AfterCaret, Item.AfterAnchor,
     Item.AfterBreakpoints, Item.AfterExecutionLine);
-  DoEditStateChanged;
+  FModified := True;
   Change;
   PushUndoItem(FUndoStack, Item);
 end;
@@ -2209,6 +2407,38 @@ begin
   ClearUndoStack(FRedoStack);
 end;
 
+procedure TCodeEditor.ExecuteCommand(Command: TCodeEditorCommand);
+begin
+  case Command of
+    eccUndo:
+      Undo;
+    eccRedo:
+      Redo;
+    eccCut:
+      CutToClipboard;
+    eccCopy:
+      CopyToClipboard;
+    eccPaste:
+      PasteFromClipboard;
+    eccSelectAll:
+      SelectAll;
+    eccFind:
+      ShowFind;
+    eccReplace:
+      ShowReplace;
+    eccToggleLineComment:
+      ToggleLineComment;
+    eccCommentSelection:
+      CommentSelection;
+    eccUncommentSelection:
+      UncommentSelection;
+    eccTriggerCompletion:
+      TriggerCompletion;
+    eccTriggerSignatureHelp:
+      TriggerSignatureHelp;
+  end;
+end;
+
 procedure TCodeEditor.CreateCompletionPopup;
 begin
   if Assigned(FCompletionForm) then
@@ -2216,15 +2446,18 @@ begin
 
   FCompletionForm := TForm.CreateNew(nil);
   FCompletionForm.BorderStyle := bsNone;
-  FCompletionForm.FormStyle := fsStayOnTop;
+  FCompletionForm.BorderIcons := [];
+  // pmExplicit keeps the popup above its owning form only, instead of the
+  // process-wide topmost that fsStayOnTop would impose.
+  FCompletionForm.PopupMode := pmExplicit;
   FCompletionForm.Position := poDesigned;
-  FCompletionForm.Width := 280;
-  FCompletionForm.Height := 180;
+  FCompletionForm.Width := 560;
+  FCompletionForm.Height := 320;
 
   FCompletionList := TListBox.Create(FCompletionForm);
   FCompletionList.Parent := FCompletionForm;
   FCompletionList.Align := alClient;
-  FCompletionList.IntegralHeight := True;
+  FCompletionList.IntegralHeight := False;
   FCompletionList.OnClick := CompletionListClick;
   FCompletionList.OnDblClick := CompletionListDblClick;
 end;
@@ -2250,6 +2483,8 @@ var
   Context: TCodeCompletionContext;
   Prefix: string;
   P: TPoint;
+  LineText: string;
+  EndColumn: Integer;
 begin
   if not Assigned(FCompletionProvider) then
     Exit;
@@ -2258,6 +2493,17 @@ begin
   FCompletionStart := FCaret;
   if TriggerChar = #0 then
     Dec(FCompletionStart.Column, Length(Prefix));
+  FCompletionEnd := FCaret;
+
+  if (FCaret.Line >= 0) and (FCaret.Line < FLines.Count) then
+  begin
+    LineText := FLines[FCaret.Line];
+    EndColumn := EnsureRange(FCaret.Column, 0, Length(LineText));
+    while (EndColumn < Length(LineText)) and
+      (LineText[EndColumn + 1].IsLetterOrDigit or (LineText[EndColumn + 1] = '_')) do
+      Inc(EndColumn);
+    FCompletionEnd := TCodePosition.Create(FCaret.Line, EndColumn);
+  end;
 
   FreeAndNil(FCompletionItems);
   FCompletionItems := TCodeCompletionItems.Create(True);
@@ -2278,6 +2524,7 @@ begin
 
   CreateCompletionPopup;
   PopulateCompletionPopup;
+  FCompletionForm.PopupParent := GetParentForm(Self);
   P := ClientToScreen(CaretToPoint(FCaret));
   Inc(P.Y, FLineHeight);
   FCompletionForm.SetBounds(P.X, P.Y, FCompletionForm.Width, FCompletionForm.Height);
@@ -2294,14 +2541,34 @@ end;
 procedure TCodeEditor.AcceptCompletion;
 var
   Item: TCodeCompletionItem;
+  LineText: string;
+  StartPos: TCodePosition;
+  EndPos: TCodePosition;
+  UndoItem: TCodeUndoItem;
 begin
   if not CompletionVisible or (FCompletionList.ItemIndex < 0) then
     Exit;
 
   Item := TCodeCompletionItem(FCompletionList.Items.Objects[FCompletionList.ItemIndex]);
   HideCompletion;
-  FAnchor := FCompletionStart;
-  InsertText(Item.InsertText);
+
+  StartPos := NormalizePosition(FCompletionStart);
+  EndPos := NormalizePosition(FCompletionEnd);
+  if (StartPos.Line <> EndPos.Line) or (StartPos.Line < 0) or (StartPos.Line >= FLines.Count) then
+    Exit;
+
+  FinishUndoGroup;
+  UndoItem := CaptureUndoState;
+  LineText := FLines[StartPos.Line];
+  StartPos.Column := EnsureRange(StartPos.Column, 0, Length(LineText));
+  EndPos.Column := EnsureRange(EndPos.Column, StartPos.Column, Length(LineText));
+  FLines[StartPos.Line] := Copy(LineText, 1, StartPos.Column) + Item.InsertText +
+    Copy(LineText, EndPos.Column + 1, MaxInt);
+  FCaret := TCodePosition.Create(StartPos.Line, StartPos.Column + Length(Item.InsertText));
+  FAnchor := FCaret;
+  LinesChanged(Self);
+  EnsureCaretVisible;
+  CommitUndoState(UndoItem);
 end;
 
 procedure TCodeEditor.CompletionListClick(Sender: TObject);
@@ -2332,7 +2599,7 @@ begin
 
   FSignatureForm := TForm.CreateNew(nil);
   FSignatureForm.BorderStyle := bsNone;
-  FSignatureForm.FormStyle := fsStayOnTop;
+  FSignatureForm.PopupMode := pmExplicit;
   FSignatureForm.Position := poDesigned;
   FSignatureForm.Width := 420;
   FSignatureForm.Height := 54;
@@ -2408,6 +2675,7 @@ begin
 
   CreateSignaturePopup;
   PopulateSignaturePopup;
+  FSignatureForm.PopupParent := GetParentForm(Self);
   P := ClientToScreen(CaretToPoint(FCaret));
   Inc(P.Y, FLineHeight + 4);
   FSignatureForm.SetBounds(P.X, P.Y, FSignatureForm.Width, FSignatureForm.Height);
@@ -2678,7 +2946,11 @@ procedure TCodeEditor.UpdateSearch;
 var
   LineIndex: Integer;
   SourceLine: string;
+  Haystack: string;
   SearchText: string;
+  Needle: string;
+  MatchCase: Boolean;
+  WholeWord: Boolean;
   FoundAt: Integer;
   Offset: Integer;
   Options: TRegExOptions;
@@ -2686,76 +2958,89 @@ var
   Match: TMatch;
   SearchMatch: TCodeSearchMatch;
 begin
-  if not Assigned(FSearchMatches) then
+  if not Assigned(FSearchMatches) or FSearchUpdating then
     Exit;
 
-  FSearchMatches.Clear;
-  FSearchIndex := -1;
-  SearchText := FSearchEdit.Text;
-  if SearchText = '' then
-  begin
-    FSearchStatusLabel.Caption := 'No results';
-    Invalidate;
-    Exit;
-  end;
-
-  for LineIndex := 0 to FLines.Count - 1 do
-  begin
-    SourceLine := FLines[LineIndex];
-    if FSearchRegexButton.Down then
+  FSearchUpdating := True;
+  try
+    FSearchMatches.Clear;
+    FSearchIndex := -1;
+    SearchText := FSearchEdit.Text;
+    if SearchText = '' then
     begin
-      Options := [];
-      if not FSearchMatchCaseButton.Down then
-        Include(Options, roIgnoreCase);
-      try
-        Matches := TRegEx.Matches(SourceLine, SearchText, Options);
-        for Match in Matches do
-          if Match.Length > 0 then
+      FSearchStatusLabel.Caption := 'No results';
+      Invalidate;
+      Exit;
+    end;
+
+    MatchCase := FSearchMatchCaseButton.Down;
+    WholeWord := FSearchWholeWordButton.Down;
+    if MatchCase then
+      Needle := SearchText
+    else
+      Needle := LowerCase(SearchText);
+
+    for LineIndex := 0 to FLines.Count - 1 do
+    begin
+      SourceLine := FLines[LineIndex];
+      if FSearchRegexButton.Down then
+      begin
+        Options := [];
+        if not MatchCase then
+          Include(Options, roIgnoreCase);
+        try
+          Matches := TRegEx.Matches(SourceLine, SearchText, Options);
+          for Match in Matches do
+            if Match.Length > 0 then
+            begin
+              // TMatch.Index is 1-based; stored columns are 0-based.
+              if WholeWord and not IsWholeWordMatch(SourceLine, Match.Index - 1, Match.Length) then
+                Continue;
+              SearchMatch.Line := LineIndex;
+              SearchMatch.Column := Match.Index - 1;
+              SearchMatch.Length := Match.Length;
+              FSearchMatches.Add(SearchMatch);
+            end;
+        except
+          FSearchStatusLabel.Caption := 'Invalid regex';
+          Invalidate;
+          Exit;
+        end;
+      end
+      else
+      begin
+        if MatchCase then
+          Haystack := SourceLine
+        else
+          Haystack := LowerCase(SourceLine);
+        Offset := 1;
+        repeat
+          FoundAt := PosEx(Needle, Haystack, Offset);
+          if FoundAt = 0 then
+            Break;
+          if not WholeWord or IsWholeWordMatch(SourceLine, FoundAt - 1, Length(Needle)) then
           begin
-            if FSearchWholeWordButton.Down and not IsWholeWordMatch(SourceLine, Match.Index, Match.Length) then
-              Continue;
             SearchMatch.Line := LineIndex;
-            SearchMatch.Column := Match.Index;
-            SearchMatch.Length := Match.Length;
+            SearchMatch.Column := FoundAt - 1;
+            SearchMatch.Length := Length(Needle);
             FSearchMatches.Add(SearchMatch);
           end;
-      except
-        FSearchStatusLabel.Caption := 'Invalid regex';
-        Invalidate;
-        Exit;
+          Offset := FoundAt + Length(Needle);
+        until Offset > Length(Haystack);
       end;
-    end
+    end;
+
+    if FSearchMatches.Count = 0 then
+      FSearchStatusLabel.Caption := 'No results'
     else
     begin
-      Offset := 1;
-      repeat
-        if FSearchMatchCaseButton.Down then
-          FoundAt := Pos(SearchText, Copy(SourceLine, Offset, MaxInt))
-        else
-          FoundAt := Pos(LowerCase(SearchText), LowerCase(Copy(SourceLine, Offset, MaxInt)));
-        if FoundAt = 0 then
-          Break;
-        Inc(FoundAt, Offset - 1);
-        if not FSearchWholeWordButton.Down or IsWholeWordMatch(SourceLine, FoundAt - 1, Length(SearchText)) then
-        begin
-          SearchMatch.Line := LineIndex;
-          SearchMatch.Column := FoundAt - 1;
-          SearchMatch.Length := Length(SearchText);
-          FSearchMatches.Add(SearchMatch);
-        end;
-        Offset := FoundAt + Max(1, Length(SearchText));
-      until Offset > Length(SourceLine);
+      FSearchIndex := 0;
+      FSearchStatusLabel.Caption := Format('%d of %d', [FSearchIndex + 1, FSearchMatches.Count]);
     end;
+    Invalidate;
+  finally
+    FSearchUpdating := False;
   end;
-
-  if FSearchMatches.Count = 0 then
-    FSearchStatusLabel.Caption := 'No results'
-  else
-  begin
-    FSearchIndex := 0;
-    FSearchStatusLabel.Caption := Format('%d of %d', [FSearchIndex + 1, FSearchMatches.Count]);
-  end;
-  Invalidate;
 end;
 
 procedure TCodeEditor.SelectSearchMatch(Index: Integer);
@@ -2789,13 +3074,25 @@ begin
 end;
 
 procedure TCodeEditor.ReplaceCurrentMatch;
+var
+  I: Integer;
 begin
   if FSearchMatches.Count = 0 then
     Exit;
 
   SelectSearchMatch(FSearchIndex);
-  SelectedText := FReplaceEdit.Text;
-  UpdateSearch;
+  SelectedText := FReplaceEdit.Text;  // LinesChanged refreshes FSearchMatches
+
+  // Continue from the next match after the replacement instead of match #1.
+  for I := 0 to FSearchMatches.Count - 1 do
+    if (FSearchMatches[I].Line > FCaret.Line) or
+      ((FSearchMatches[I].Line = FCaret.Line) and (FSearchMatches[I].Column >= FCaret.Column)) then
+    begin
+      SelectSearchMatch(I);
+      Exit;
+    end;
+  if FSearchMatches.Count > 0 then
+    SelectSearchMatch(0);
 end;
 
 procedure TCodeEditor.ReplaceAllMatches;
@@ -2810,17 +3107,20 @@ begin
 
   FinishUndoGroup;
   UndoItem := CaptureUndoState;
-  for I := FSearchMatches.Count - 1 downto 0 do
-  begin
-    Match := FSearchMatches[I];
-    LineText := FLines[Match.Line];
-    Delete(LineText, Match.Column + 1, Match.Length);
-    Insert(FReplaceEdit.Text, LineText, Match.Column + 1);
-    FLines[Match.Line] := LineText;
+  FLines.BeginUpdate;
+  try
+    for I := FSearchMatches.Count - 1 downto 0 do
+    begin
+      Match := FSearchMatches[I];
+      LineText := FLines[Match.Line];
+      Delete(LineText, Match.Column + 1, Match.Length);
+      Insert(FReplaceEdit.Text, LineText, Match.Column + 1);
+      FLines[Match.Line] := LineText;
+    end;
+  finally
+    FLines.EndUpdate;  // fires LinesChanged once, which re-runs the search
   end;
   CommitUndoState(UndoItem);
-  UpdateSearch;
-  LinesChanged(Self);
 end;
 
 procedure TCodeEditor.HideSearchPanel;
@@ -3008,10 +3308,9 @@ begin
       SearchStart := StartPos.Column + 1
     else
       SearchStart := 1;
-    FoundAt := Pos(Needle, Copy(FLines[LineIndex], SearchStart, MaxInt));
+    FoundAt := PosEx(Needle, FLines[LineIndex], SearchStart);
     if FoundAt > 0 then
     begin
-      Inc(FoundAt, SearchStart - 1);
       AddSelectionRange(TCodePosition.Create(LineIndex, FoundAt - 1),
         TCodePosition.Create(LineIndex, FoundAt - 1 + Length(Needle)));
       Invalidate;
@@ -3038,10 +3337,9 @@ begin
   begin
     SearchStart := 1;
     repeat
-      FoundAt := Pos(Needle, Copy(FLines[LineIndex], SearchStart, MaxInt));
+      FoundAt := PosEx(Needle, FLines[LineIndex], SearchStart);
       if FoundAt = 0 then
         Break;
-      Inc(FoundAt, SearchStart - 1);
       if not ((LineIndex = SelectionStart.Line) and (FoundAt - 1 = SelectionStart.Column)) then
         AddSelectionRange(TCodePosition.Create(LineIndex, FoundAt - 1),
           TCodePosition.Create(LineIndex, FoundAt - 1 + Length(Needle)));
@@ -3056,6 +3354,10 @@ begin
   if FHighlighter <> Value then
   begin
     FHighlighter := Value;
+    FLineTokenCache.Clear;
+    FStateChainValid := 0;
+    if Assigned(FHighlighter) then
+      FHighlighter.FreeNotification(Self);
     Invalidate;
   end;
 end;
@@ -3066,6 +3368,27 @@ begin
   begin
     HideCompletion;
     FCompletionProvider := Value;
+    if Assigned(FCompletionProvider) then
+      FCompletionProvider.FreeNotification(Self);
+  end;
+end;
+
+procedure TCodeEditor.Notification(AComponent: TComponent; Operation: TOperation);
+begin
+  inherited;
+  if Operation = opRemove then
+  begin
+    if AComponent = FHighlighter then
+    begin
+      FHighlighter := nil;
+      Invalidate;
+    end;
+    if AComponent = FCompletionProvider then
+    begin
+      HideCompletion;
+      HideSignatureHelp;
+      FCompletionProvider := nil;
+    end;
   end;
 end;
 
@@ -3145,6 +3468,7 @@ end;
 procedure TCodeEditor.SetCaret(Value: TCodePosition);
 begin
   FinishUndoGroup;
+  FDesiredColumn := -1;
   ClearExtraSelections;
   FCaret := NormalizePosition(Value);
   FAnchor := FCaret;
@@ -3178,13 +3502,20 @@ end;
 
 procedure TCodeEditor.LinesChanged(Sender: TObject);
 begin
-  UpdateMetrics;
+  FMaxLineLengthValid := False;
+  FDesiredColumn := -1;
+  // We don't know which line changed, so restart state validation from the
+  // top; EnsureLineStates reuses cached entries, so this is cheap.
+  FStateChainValid := 0;
+  UpdateGutterWidth;
   UpdateScrollBars;
   if not FApplyingUndo then
   begin
     DoEditStateChanged;
     Change;
   end;
+  if SearchVisible then
+    UpdateSearch;  // keep match positions in sync with edits
   DoCaretChange;
   DoSelectionChange;
   Invalidate;
@@ -3289,9 +3620,8 @@ begin
     for I := SelectedLineStart to SelectedLineEnd do
       FLines[I] := Prefix + FLines[I];
   finally
-    FLines.EndUpdate;
+    FLines.EndUpdate;  // fires LinesChanged once
   end;
-  LinesChanged(Self);
   CommitUndoState(UndoItem);
 end;
 
@@ -3325,9 +3655,8 @@ begin
       FLines[I] := LineText;
     end;
   finally
-    FLines.EndUpdate;
+    FLines.EndUpdate;  // fires LinesChanged once
   end;
-  LinesChanged(Self);
   CommitUndoState(UndoItem);
 end;
 
@@ -3357,6 +3686,75 @@ begin
     UncommentSelection
   else
     CommentSelection;
+end;
+
+procedure TCodeEditor.IndentSelection;
+var
+  I: Integer;
+  Spaces: string;
+  UndoItem: TCodeUndoItem;
+begin
+  if FReadOnly then
+    Exit;
+
+  Spaces := StringOfChar(' ', FOptions.TabSize);
+  FinishUndoGroup;
+  UndoItem := CaptureUndoState;
+  FLines.BeginUpdate;
+  try
+    for I := SelectedLineStart to SelectedLineEnd do
+      FLines[I] := Spaces + FLines[I];
+    if (FCaret.Line >= SelectedLineStart) and (FCaret.Line <= SelectedLineEnd) and (FCaret.Column > 0) then
+      Inc(FCaret.Column, Length(Spaces));
+    if (FAnchor.Line >= SelectedLineStart) and (FAnchor.Line <= SelectedLineEnd) and (FAnchor.Column > 0) then
+      Inc(FAnchor.Column, Length(Spaces));
+  finally
+    FLines.EndUpdate;
+  end;
+  CommitUndoState(UndoItem);
+end;
+
+procedure TCodeEditor.UnindentSelection;
+var
+  I: Integer;
+  LineText: string;
+  Removed: Integer;
+  UndoItem: TCodeUndoItem;
+
+  function LeadingSpacesToRemove(const S: string): Integer;
+  begin
+    Result := 0;
+    while (Result < FOptions.TabSize) and (Result < Length(S)) and (S[Result + 1] = ' ') do
+      Inc(Result);
+  end;
+
+begin
+  if FReadOnly then
+    Exit;
+
+  FinishUndoGroup;
+  UndoItem := CaptureUndoState;
+  FLines.BeginUpdate;
+  try
+    for I := SelectedLineStart to SelectedLineEnd do
+    begin
+      LineText := FLines[I];
+      Removed := LeadingSpacesToRemove(LineText);
+      if Removed = 0 then
+        Continue;
+      Delete(LineText, 1, Removed);
+      FLines[I] := LineText;
+      if (FCaret.Line = I) and (FCaret.Column > 0) then
+        FCaret.Column := Max(0, FCaret.Column - Removed);
+      if (FAnchor.Line = I) and (FAnchor.Column > 0) then
+        FAnchor.Column := Max(0, FAnchor.Column - Removed);
+    end;
+    FCaret := NormalizePosition(FCaret);
+    FAnchor := NormalizePosition(FAnchor);
+  finally
+    FLines.EndUpdate;
+  end;
+  CommitUndoState(UndoItem);
 end;
 
 procedure TCodeEditor.DeleteSelection;
@@ -3436,9 +3834,19 @@ begin
   end;
 end;
 
-procedure TCodeEditor.ReplaceAllSelections(const Value: string);
+function TCodeEditor.CollectSelectionRanges: TArray<TCodeSelectionRange>;
 var
-  Ranges: TArray<TCodeSelectionRange>;
+  I: Integer;
+begin
+  SetLength(Result, FSelections.Count + 1);
+  Result[0].Anchor := FAnchor;
+  Result[0].Caret := FCaret;
+  for I := 0 to FSelections.Count - 1 do
+    Result[I + 1] := FSelections[I];
+end;
+
+procedure TCodeEditor.ApplyRangeEdits(var Ranges: TArray<TCodeSelectionRange>; const Value: string);
+var
   NewCarets: TArray<TCodePosition>;
   Count: Integer;
   I, J: Integer;
@@ -3447,12 +3855,12 @@ var
   StartPos: TCodePosition;
   EndPos: TCodePosition;
   NewCaret: TCodePosition;
-  DeltaLines: Integer;
-  DeltaColumns: Integer;
 
   procedure AdjustSavedCarets(const AEndPos, ANewCaret: TCodePosition; SavedCount: Integer);
   var
     K: Integer;
+    DeltaLines: Integer;
+    DeltaColumns: Integer;
   begin
     DeltaLines := ANewCaret.Line - AEndPos.Line;
     DeltaColumns := ANewCaret.Column - AEndPos.Column;
@@ -3477,24 +3885,15 @@ var
       end;
     end;
   end;
+
 begin
-  if FReadOnly then
+  Count := Length(Ranges);
+  if Count = 0 then
     Exit;
+  SetLength(NewCarets, Count);
 
-  if not HasMultipleSelections and not HasSelection then
-    Exit;
-
-  SetLength(Ranges, FSelections.Count + 1);
-  SetLength(NewCarets, FSelections.Count + 1);
-  Ranges[0].Anchor := FAnchor;
-  Ranges[0].Caret := FCaret;
-  Count := 1;
-  for I := 0 to FSelections.Count - 1 do
-  begin
-    Ranges[Count] := FSelections[I];
-    Inc(Count);
-  end;
-
+  // Process ranges from the end of the document backwards so earlier edits
+  // don't shift the positions of ranges still to be applied.
   for I := 1 to Count - 1 do
   begin
     Tmp := Ranges[I];
@@ -3532,47 +3931,9 @@ begin
   CommitUndoState(UndoItem);
 end;
 
-procedure TCodeEditor.DeleteAllSelections(DeletePrevious: Boolean);
+procedure TCodeEditor.ReplaceAllSelections(const Value: string);
 var
   Ranges: TArray<TCodeSelectionRange>;
-  NewCarets: TArray<TCodePosition>;
-  Count: Integer;
-  I, J: Integer;
-  Tmp: TCodeSelectionRange;
-  StartPos: TCodePosition;
-  EndPos: TCodePosition;
-  NewCaret: TCodePosition;
-  UndoItem: TCodeUndoItem;
-  DeltaLines: Integer;
-  DeltaColumns: Integer;
-
-  procedure AdjustSavedCarets(const AEndPos, ANewCaret: TCodePosition; SavedCount: Integer);
-  var
-    K: Integer;
-  begin
-    DeltaLines := ANewCaret.Line - AEndPos.Line;
-    DeltaColumns := ANewCaret.Column - AEndPos.Column;
-
-    for K := 0 to SavedCount - 1 do
-    begin
-      if ComparePositions(NewCarets[K], AEndPos) < 0 then
-        Continue;
-
-      if DeltaLines = 0 then
-      begin
-        if NewCarets[K].Line = AEndPos.Line then
-          Inc(NewCarets[K].Column, DeltaColumns);
-      end
-      else
-      begin
-        if NewCarets[K].Line = AEndPos.Line then
-          NewCarets[K] := TCodePosition.Create(ANewCaret.Line,
-            ANewCaret.Column + (NewCarets[K].Column - AEndPos.Column))
-        else
-          Inc(NewCarets[K].Line, DeltaLines);
-      end;
-    end;
-  end;
 begin
   if FReadOnly then
     Exit;
@@ -3580,63 +3941,32 @@ begin
   if not HasMultipleSelections and not HasSelection then
     Exit;
 
-  SetLength(Ranges, FSelections.Count + 1);
-  SetLength(NewCarets, FSelections.Count + 1);
-  Ranges[0].Anchor := FAnchor;
-  Ranges[0].Caret := FCaret;
-  Count := 1;
-  for I := 0 to FSelections.Count - 1 do
-  begin
-    Ranges[Count] := FSelections[I];
-    Inc(Count);
-  end;
+  Ranges := CollectSelectionRanges;
+  ApplyRangeEdits(Ranges, Value);
+end;
 
-  for I := 0 to Count - 1 do
-  begin
-    if ComparePositions(Ranges[I].Anchor, Ranges[I].Caret) <> 0 then
-      Continue;
+procedure TCodeEditor.DeleteAllSelections(DeletePrevious: Boolean);
+var
+  Ranges: TArray<TCodeSelectionRange>;
+  I: Integer;
+begin
+  if FReadOnly then
+    Exit;
 
-    if DeletePrevious then
-      Ranges[I].Anchor := PositionBefore(Ranges[I].Caret)
-    else
-      Ranges[I].Caret := PositionAfter(Ranges[I].Anchor);
-  end;
+  if not HasMultipleSelections and not HasSelection then
+    Exit;
 
-  for I := 1 to Count - 1 do
-  begin
-    Tmp := Ranges[I];
-    J := I - 1;
-    while (J >= 0) and (ComparePositions(RangeStart(Ranges[J]), RangeStart(Tmp)) < 0) do
+  Ranges := CollectSelectionRanges;
+  // Empty ranges (bare carets) delete one character to the side instead.
+  for I := 0 to High(Ranges) do
+    if ComparePositions(Ranges[I].Anchor, Ranges[I].Caret) = 0 then
     begin
-      Ranges[J + 1] := Ranges[J];
-      Dec(J);
+      if DeletePrevious then
+        Ranges[I].Anchor := PositionBefore(Ranges[I].Caret)
+      else
+        Ranges[I].Caret := PositionAfter(Ranges[I].Anchor);
     end;
-    Ranges[J + 1] := Tmp;
-  end;
-
-  FinishUndoGroup;
-  UndoItem := CaptureUndoState;
-  for I := 0 to Count - 1 do
-  begin
-    StartPos := RangeStart(Ranges[I]);
-    EndPos := RangeEnd(Ranges[I]);
-    InsertTextAtRange(StartPos, EndPos, '', NewCaret);
-    AdjustSavedCarets(EndPos, NewCaret, I);
-    NewCarets[I] := NewCaret;
-  end;
-
-  FCaret := NewCarets[Count - 1];
-  FAnchor := FCaret;
-  ClearExtraSelections;
-  for I := 0 to Count - 2 do
-  begin
-    Tmp.Anchor := NewCarets[I];
-    Tmp.Caret := NewCarets[I];
-    FSelections.Add(Tmp);
-  end;
-  EnsureCaretVisible;
-  LinesChanged(Self);
-  CommitUndoState(UndoItem);
+  ApplyRangeEdits(Ranges, '');
 end;
 
 procedure TCodeEditor.InsertText(const Value: string; AddUndo: Boolean);
@@ -3793,9 +4123,12 @@ begin
   DoSelectionChange;
 end;
 
-procedure TCodeEditor.MoveCaret(const Position: TCodePosition; Shift: TShiftState);
+procedure TCodeEditor.MoveCaret(const Position: TCodePosition; Shift: TShiftState;
+  PreserveDesiredColumn: Boolean);
 begin
   FinishUndoGroup;
+  if not PreserveDesiredColumn then
+    FDesiredColumn := -1;
   if not (ssShift in Shift) then
     ClearExtraSelections;
   FCaret := NormalizePosition(Position);
@@ -3805,6 +4138,73 @@ begin
   Invalidate;
   DoCaretChange;
   DoSelectionChange;
+end;
+
+procedure TCodeEditor.MoveCaretVertically(DeltaLines: Integer; Shift: TShiftState);
+var
+  Target: TCodePosition;
+begin
+  // Remember the column the user is aiming for so that passing through short
+  // lines doesn't permanently snap the caret to their length.
+  if FDesiredColumn < 0 then
+    FDesiredColumn := FCaret.Column;
+  Target.Line := FCaret.Line + DeltaLines;
+  Target.Column := FDesiredColumn;
+  MoveCaret(Target, Shift, True);
+end;
+
+function TCodeEditor.PrevWordPosition(const Position: TCodePosition): TCodePosition;
+var
+  LineText: string;
+begin
+  Result := NormalizePosition(Position);
+  if Result.Column = 0 then
+  begin
+    if Result.Line > 0 then
+    begin
+      Dec(Result.Line);
+      Result.Column := Length(FLines[Result.Line]);
+    end;
+    Exit;
+  end;
+
+  LineText := FLines[Result.Line];
+  while (Result.Column > 0) and LineText[Result.Column].IsWhiteSpace do
+    Dec(Result.Column);
+  if (Result.Column > 0) and IsWordChar(LineText[Result.Column]) then
+    while (Result.Column > 0) and IsWordChar(LineText[Result.Column]) do
+      Dec(Result.Column)
+  else
+    while (Result.Column > 0) and not (LineText[Result.Column].IsWhiteSpace or
+      IsWordChar(LineText[Result.Column])) do
+      Dec(Result.Column);
+end;
+
+function TCodeEditor.NextWordPosition(const Position: TCodePosition): TCodePosition;
+var
+  LineText: string;
+begin
+  Result := NormalizePosition(Position);
+  LineText := FLines[Result.Line];
+  if Result.Column >= Length(LineText) then
+  begin
+    if Result.Line < FLines.Count - 1 then
+    begin
+      Inc(Result.Line);
+      Result.Column := 0;
+    end;
+    Exit;
+  end;
+
+  if IsWordChar(LineText[Result.Column + 1]) then
+    while (Result.Column < Length(LineText)) and IsWordChar(LineText[Result.Column + 1]) do
+      Inc(Result.Column)
+  else if not LineText[Result.Column + 1].IsWhiteSpace then
+    while (Result.Column < Length(LineText)) and not (LineText[Result.Column + 1].IsWhiteSpace or
+      IsWordChar(LineText[Result.Column + 1])) do
+      Inc(Result.Column);
+  while (Result.Column < Length(LineText)) and LineText[Result.Column + 1].IsWhiteSpace do
+    Inc(Result.Column);
 end;
 
 procedure TCodeEditor.KeyDown(var Key: Word; Shift: TShiftState);
@@ -3855,27 +4255,44 @@ begin
 
   case Key of
     VK_LEFT:
-      if FCaret.Column > 0 then
+      if ssCtrl in Shift then
+        MoveCaret(PrevWordPosition(FCaret), Shift)
+      else if FCaret.Column > 0 then
         MoveCaret(TCodePosition.Create(FCaret.Line, FCaret.Column - 1), Shift)
       else if FCaret.Line > 0 then
         MoveCaret(TCodePosition.Create(FCaret.Line - 1, Length(FLines[FCaret.Line - 1])), Shift);
     VK_RIGHT:
-      if FCaret.Column < Length(FLines[FCaret.Line]) then
+      if ssCtrl in Shift then
+        MoveCaret(NextWordPosition(FCaret), Shift)
+      else if FCaret.Column < Length(FLines[FCaret.Line]) then
         MoveCaret(TCodePosition.Create(FCaret.Line, FCaret.Column + 1), Shift)
       else if FCaret.Line < FLines.Count - 1 then
         MoveCaret(TCodePosition.Create(FCaret.Line + 1, 0), Shift);
     VK_UP:
-      MoveCaret(TCodePosition.Create(FCaret.Line - 1, FCaret.Column), Shift);
+      MoveCaretVertically(-1, Shift);
     VK_DOWN:
-      MoveCaret(TCodePosition.Create(FCaret.Line + 1, FCaret.Column), Shift);
+      MoveCaretVertically(1, Shift);
     VK_HOME:
-      MoveCaret(TCodePosition.Create(FCaret.Line, 0), Shift);
+      if ssCtrl in Shift then
+        MoveCaret(TCodePosition.Create(0, 0), Shift)
+      else
+        MoveCaret(TCodePosition.Create(FCaret.Line, 0), Shift);
     VK_END:
-      MoveCaret(TCodePosition.Create(FCaret.Line, Length(FLines[FCaret.Line])), Shift);
+      if ssCtrl in Shift then
+        MoveCaret(TCodePosition.Create(FLines.Count - 1, Length(FLines[FLines.Count - 1])), Shift)
+      else
+        MoveCaret(TCodePosition.Create(FCaret.Line, Length(FLines[FCaret.Line])), Shift);
     VK_PRIOR:
-      MoveCaret(TCodePosition.Create(FCaret.Line - VisibleLineCount, FCaret.Column), Shift);
+      MoveCaretVertically(-VisibleLineCount, Shift);
     VK_NEXT:
-      MoveCaret(TCodePosition.Create(FCaret.Line + VisibleLineCount, FCaret.Column), Shift);
+      MoveCaretVertically(VisibleLineCount, Shift);
+    VK_TAB:
+      if ssShift in Shift then
+      begin
+        UnindentSelection;
+        FSuppressKeyPress := True;
+        Key := 0;
+      end;
     VK_DELETE:
       begin
         if FReadOnly then
@@ -3885,7 +4302,6 @@ begin
           Exit;
         end;
         HideCompletion;
-        HideSignatureHelp;
         HideSignatureHelp;
         if HasMultipleSelections then
         begin
@@ -3922,29 +4338,25 @@ begin
     Ord('C'):
       if ssCtrl in Shift then
       begin
-        Clipboard.AsText := SelectedText;
+        CopyToClipboard;
+        Key := 0;
+      end;
+    Ord('D'):
+      if ssCtrl in Shift then
+      begin
+        AddNextSelectionOccurrence;
+        Key := 0;
+      end;
+    Ord('L'):
+      if (ssCtrl in Shift) and (ssShift in Shift) then
+      begin
+        SelectAllSelectionOccurrences;
         Key := 0;
       end;
     Ord('X'):
       if ssCtrl in Shift then
       begin
-        if FReadOnly then
-        begin
-          Clipboard.AsText := SelectedText;
-          Key := 0;
-          Exit;
-        end;
-        FinishUndoGroup;
-        Clipboard.AsText := SelectedText;
-        if HasMultipleSelections then
-          ReplaceAllSelections('')
-        else
-        begin
-          UndoItem := CaptureUndoState;
-          DeleteSelection;
-          LinesChanged(Self);
-          CommitUndoState(UndoItem);
-        end;
+        CutToClipboard;
         Key := 0;
       end;
     Ord('F'):
@@ -3964,8 +4376,8 @@ begin
       begin
         HideCompletion;
         HideSignatureHelp;
-        HideSignatureHelp;
         PasteFromClipboard;
+        FSuppressKeyPress := True;
         Key := 0;
       end;
     VK_SPACE:
@@ -3975,6 +4387,7 @@ begin
           TriggerSignatureHelp
         else
           TriggerCompletion;
+        FSuppressKeyPress := True;
         Key := 0;
       end;
     Ord('Y'):
@@ -3992,7 +4405,7 @@ begin
           Undo;
         Key := 0;
       end;
-    VK_F5:
+    VK_F5, VK_F9:
       begin
         ToggleBreakpoint(FCaret.Line + 1);
         Key := 0;
@@ -4006,6 +4419,11 @@ begin
       else if SignatureVisible then
       begin
         HideSignatureHelp;
+        Key := 0;
+      end
+      else if SearchVisible then
+      begin
+        HideSearchPanel;
         Key := 0;
       end;
   end;
@@ -4026,6 +4444,13 @@ begin
   end;
 
   case Key of
+    #22:
+      begin
+        HideCompletion;
+        HideSignatureHelp;
+        PasteFromClipboard;
+        Key := #0;
+      end;
     #8:
       begin
         if FReadOnly then
@@ -4078,7 +4503,10 @@ begin
         end;
         HideCompletion;
         FinishUndoGroup;
-        InsertText(StringOfChar(' ', FOptions.TabSize));
+        if HasSelection and (SelectionStart.Line <> SelectionEnd.Line) then
+          IndentSelection
+        else
+          InsertText(StringOfChar(' ', FOptions.TabSize));
         Key := #0;
       end;
     #13:
@@ -4095,21 +4523,24 @@ begin
         InsertText(sLineBreak);
         Key := #0;
       end;
-    #32..#255:
+  else
+    // Accept any printable character, including Unicode above #255 (IME,
+    // non-Western keyboard layouts).
+    if Key >= #32 then
+    begin
+      InsertTypedText(Key);
+      if CharInSet(Key, ['.', '(', '<']) then
       begin
-        InsertTypedText(Key);
-        if CharInSet(Key, ['.', '(', '<']) then
-        begin
-          ShowCompletion(Key, False)
-        end
-        else if CompletionVisible then
-          ShowCompletion(#0, False);
-        if CharInSet(Key, ['(', '<']) then
-          ShowSignatureHelp(Key, False)
-        else if Key = ',' then
-          UpdateSignatureHelp(Key);
-        Key := #0;
-      end;
+        ShowCompletion(Key, False)
+      end
+      else if CompletionVisible then
+        ShowCompletion(#0, False);
+      if CharInSet(Key, ['(', '<']) then
+        ShowSignatureHelp(Key, False)
+      else if Key = ',' then
+        UpdateSignatureHelp(Key);
+      Key := #0;
+    end;
   end;
 end;
 
@@ -4264,12 +4695,6 @@ begin
 end;
 
 procedure TCodeEditor.SelectWordAtCaret;
-
-  function IsWordChar(Ch: Char): Boolean;
-  begin
-    Result := Ch.IsLetterOrDigit or (Ch = '_');
-  end;
-
 var
   LineText: string;
   StartCol: Integer;
@@ -4431,22 +4856,7 @@ end;
 procedure TCodeEditor.ShiftBreakpoints(AfterLine, Delta: Integer);
 var
   I: Integer;
-  Bp: Integer;
   Affected: Boolean;
-
-  function Remap(L: Integer): Integer;
-  begin
-    Result := L;
-    if L <= AfterLine then
-      Exit;
-    if Delta >= 0 then
-      Result := L + Delta
-    else if L <= AfterLine - Delta then
-      Result := AfterLine
-    else
-      Result := L + Delta;
-  end;
-
 begin
   if Delta = 0 then
     Exit;
@@ -4454,7 +4864,7 @@ begin
   Affected := (FExecutionLine > AfterLine);
   if not Affected then
     for I := 0 to FBreakpoints.Count - 1 do
-      if Remap(FBreakpoints[I].Line) <> FBreakpoints[I].Line then
+      if RemapLineAfterEdit(FBreakpoints[I].Line, AfterLine, Delta) <> FBreakpoints[I].Line then
       begin
         Affected := True;
         Break;
@@ -4465,10 +4875,7 @@ begin
   FBreakpoints.BeginUpdate;
   try
     for I := FBreakpoints.Count - 1 downto 0 do
-    begin
-      Bp := FBreakpoints[I].Line;
-      FBreakpoints[I].Line := Remap(Bp);
-    end;
+      FBreakpoints[I].Line := RemapLineAfterEdit(FBreakpoints[I].Line, AfterLine, Delta);
     // Remapping can produce duplicates when lines are merged together.
     for I := FBreakpoints.Count - 1 downto 1 do
       if FBreakpoints.IndexOfLine(FBreakpoints[I].Line) < I then
@@ -4489,20 +4896,6 @@ end;
 procedure TCodeEditor.ShiftLineMarkers(AfterLine, Delta: Integer);
 var
   I: Integer;
-
-  function Remap(L: Integer): Integer;
-  begin
-    Result := L;
-    if L <= AfterLine then
-      Exit;
-    if Delta >= 0 then
-      Result := L + Delta
-    else if L <= AfterLine - Delta then
-      Result := AfterLine
-    else
-      Result := L + Delta;
-  end;
-
 begin
   if Delta = 0 then
     Exit;
@@ -4510,7 +4903,8 @@ begin
   FLineMarkers.BeginUpdate;
   try
     for I := FLineMarkers.Count - 1 downto 0 do
-      FLineMarkers[I].Line := EnsureRange(Remap(FLineMarkers[I].Line), 1, Max(1, FLines.Count));
+      FLineMarkers[I].Line := EnsureRange(RemapLineAfterEdit(FLineMarkers[I].Line, AfterLine, Delta),
+        1, Max(1, FLines.Count));
   finally
     FLineMarkers.EndUpdate;
   end;
@@ -4657,21 +5051,21 @@ begin
 end;
 
 procedure TCodeEditor.Paint;
-var
-  ThemeColors: TCodeEditorThemeColors;
 begin
-  ThemeColors := ActiveTheme;
+  // Resolve the theme once per paint; the Paint* helpers all read FPaintTheme
+  // instead of allocating their own copy per call (or worse, per line).
+  FPaintTheme := ActiveTheme;
   try
-    Canvas.Brush.Color := ThemeColors.Background;
+    Canvas.Brush.Color := FPaintTheme.Background;
     Canvas.FillRect(ClientRect);
     Canvas.Font.Assign(Font);
-    Canvas.Font.Color := ThemeColors.Text;
+    Canvas.Font.Color := FPaintTheme.Text;
     PaintGutter;
     PaintText;
     PaintMinimap;
     PaintStyledScrollBars;
   finally
-    ThemeColors.Free;
+    FreeAndNil(FPaintTheme);
   end;
 end;
 
@@ -4691,8 +5085,8 @@ begin
   if not FOptions.ShowGutter then
     Exit;
 
-  ThemeColors := ActiveTheme;
-  try
+  ThemeColors := FPaintTheme;
+  begin
     R := Rect(0, 0, FGutterWidth, ClientHeight);
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := ThemeColors.GutterBackground;
@@ -4732,8 +5126,6 @@ begin
       Text := IntToStr(LineIndex + 1);
       Canvas.TextOut(FGutterWidth - Canvas.TextWidth(Text) - 8, Y, Text);
     end;
-  finally
-    ThemeColors.Free;
   end;
 end;
 
@@ -4743,49 +5135,66 @@ var
   LineIndex: Integer;
   Y: Integer;
   LineText: string;
+  DrawText: string;
   R: TRect;
   Marker: TCodeLineMarker;
   MarkerColor: TColor;
   ThemeColors: TCodeEditorThemeColors;
+  HaveBracketMatch: Boolean;
+  BracketOpen: TCodePosition;
+  BracketClose: TCodePosition;
+  OccurrenceNeedle: string;
 begin
   R := ClientTextRect;
-  ThemeColors := ActiveTheme;
-  try
-    Canvas.Brush.Color := ThemeColors.Background;
-    for I := 0 to VisibleLineCount - 1 do
-    begin
-      LineIndex := FTopLine + I;
-      if LineIndex >= FLines.Count then
-        Break;
+  ThemeColors := FPaintTheme;
 
-      Y := I * FLineHeight + 1;
-      LineText := FLines[LineIndex];
-      Marker := FirstLineMarkerAny(LineIndex + 1);
-      MarkerColor := MarkerBackgroundColor(Marker, ThemeColors);
-      if MarkerColor <> clNone then
-      begin
-        Canvas.Brush.Color := MarkerColor;
-        Canvas.FillRect(Rect(R.Left, Y - 1, R.Right, Y - 1 + FLineHeight));
-        Canvas.Brush.Color := ThemeColors.Background;
-      end;
-      if (LineIndex + 1) = FExecutionLine then
-      begin
-        if IsDarkTheme(ThemeColors) then
-          Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, 28)
-        else
-          Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, -22);
-        Canvas.FillRect(Rect(R.Left, Y - 1, R.Right, Y - 1 + FLineHeight));
-        Canvas.Brush.Color := ThemeColors.Background;
-      end;
-      PaintSearchMatchesLine(LineIndex, Y, LineText);
-      PaintOccurrenceHighlightsLine(LineIndex, Y, LineText);
-      PaintSelectionLine(LineIndex, Y, LineText);
-      PaintTokenText(LineText, R.Left, Y, LineIndex);
-      PaintBracketMatchesLine(LineIndex, Y);
-      PaintMultipleCaretsLine(LineIndex, Y);
+  // Per-paint work hoisted out of the per-line loop: the bracket scan can
+  // touch the whole document, and the occurrence needle never changes mid-paint.
+  HaveBracketMatch := MatchingBracketPosition(BracketOpen, BracketClose);
+  OccurrenceNeedle := '';
+  if HasSelection and (SelectionStart.Line = SelectionEnd.Line) then
+    OccurrenceNeedle := GetSelectedText;
+
+  Canvas.Brush.Color := ThemeColors.Background;
+  for I := 0 to VisibleLineCount - 1 do
+  begin
+    LineIndex := FTopLine + I;
+    if LineIndex >= FLines.Count then
+      Break;
+
+    Y := I * FLineHeight + 1;
+    LineText := FLines[LineIndex];
+    // Tabs are drawn as a single space cell so the glyphs line up with the
+    // one-column-per-character caret arithmetic.
+    if Pos(#9, LineText) > 0 then
+      DrawText := StringReplace(LineText, #9, ' ', [rfReplaceAll])
+    else
+      DrawText := LineText;
+    Marker := FirstLineMarkerAny(LineIndex + 1);
+    MarkerColor := MarkerBackgroundColor(Marker, ThemeColors);
+    if MarkerColor <> clNone then
+    begin
+      Canvas.Brush.Color := MarkerColor;
+      Canvas.FillRect(Rect(R.Left, Y - 1, R.Right, Y - 1 + FLineHeight));
+      Canvas.Brush.Color := ThemeColors.Background;
     end;
-  finally
-    ThemeColors.Free;
+    if (LineIndex + 1) = FExecutionLine then
+    begin
+      if IsDarkTheme(ThemeColors) then
+        Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, 28)
+      else
+        Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, -22);
+      Canvas.FillRect(Rect(R.Left, Y - 1, R.Right, Y - 1 + FLineHeight));
+      Canvas.Brush.Color := ThemeColors.Background;
+    end;
+    PaintSearchMatchesLine(LineIndex, Y, LineText);
+    PaintOccurrenceHighlightsLine(LineIndex, Y, LineText, OccurrenceNeedle);
+    PaintSelectionLine(LineIndex, Y, LineText);
+    PaintLineTokens(LineIndex, R.Left, Y, DrawText, clNone);
+    PaintSelectedTextLine(LineIndex, R.Left, Y, DrawText);
+    if HaveBracketMatch then
+      PaintBracketMatchesLine(LineIndex, Y, BracketOpen, BracketClose);
+    PaintMultipleCaretsLine(LineIndex, Y);
   end;
 end;
 
@@ -4837,8 +5246,8 @@ begin
   if R.IsEmpty then
     Exit;
 
-  ThemeColors := ActiveTheme;
-  try
+  ThemeColors := FPaintTheme;
+  begin
     if IsDarkTheme(ThemeColors) then
       Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, 10)
     else
@@ -4867,7 +5276,7 @@ begin
 
       if Assigned(FHighlighter) then
       begin
-        Tokens := FHighlighter.TokenizeLine(LineText, LineIndex);
+        Tokens := LineTokens(LineIndex);
         if Length(Tokens) = 0 then
           PaintPlainLine
         else
@@ -4895,8 +5304,6 @@ begin
       Canvas.Pen.Color := ShiftBrightness(ThemeColors.SelectionBackground, 20);
     Canvas.Rectangle(ViewR);
     Canvas.Brush.Style := bsSolid;
-  finally
-    ThemeColors.Free;
   end;
 end;
 
@@ -4911,16 +5318,12 @@ begin
   if not FStyledScrollBars then
     Exit;
 
-  ThemeColors := ActiveTheme;
-  try
-    TrackColor := ThemeColors.GutterBackground;
-    if IsDarkTheme(ThemeColors) then
-      ThumbColor := ShiftBrightness(TrackColor, 40)
-    else
-      ThumbColor := ShiftBrightness(TrackColor, -50);
-  finally
-    ThemeColors.Free;
-  end;
+  ThemeColors := FPaintTheme;
+  TrackColor := ThemeColors.GutterBackground;
+  if IsDarkTheme(ThemeColors) then
+    ThumbColor := ShiftBrightness(TrackColor, 40)
+  else
+    ThumbColor := ShiftBrightness(TrackColor, -50);
 
   if StyledVerticalVisible then
   begin
@@ -4989,16 +5392,12 @@ begin
   if not HasSelection and not HasMultipleSelections then
     Exit;
 
-  ThemeColors := ActiveTheme;
-  try
-    if HasSelection then
-      PaintRange(SelectionStart, SelectionEnd);
-    if HasMultipleSelections then
-      for Range in FSelections do
-        PaintRange(RangeStart(Range), RangeEnd(Range));
-  finally
-    ThemeColors.Free;
-  end;
+  ThemeColors := FPaintTheme;
+  if HasSelection then
+    PaintRange(SelectionStart, SelectionEnd);
+  if HasMultipleSelections then
+    for Range in FSelections do
+      PaintRange(RangeStart(Range), RangeEnd(Range));
 end;
 
 procedure TCodeEditor.PaintMultipleCaretsLine(ALineIndex, Y: Integer);
@@ -5030,27 +5429,21 @@ begin
   if not HasMultipleSelections then
     Exit;
 
-  ThemeColors := ActiveTheme;
-  try
-    for Range in FSelections do
-      if ComparePositions(Range.Anchor, Range.Caret) = 0 then
-      begin
-        Position := NormalizePosition(Range.Caret);
-        PaintCaretAt(Position);
-      end;
-  finally
-    ThemeColors.Free;
-  end;
+  ThemeColors := FPaintTheme;
+  for Range in FSelections do
+    if ComparePositions(Range.Anchor, Range.Caret) = 0 then
+    begin
+      Position := NormalizePosition(Range.Caret);
+      PaintCaretAt(Position);
+    end;
 end;
 
-procedure TCodeEditor.PaintBracketMatchesLine(ALineIndex, Y: Integer);
+procedure TCodeEditor.PaintBracketMatchesLine(ALineIndex, Y: Integer;
+  const OpenPos, ClosePos: TCodePosition);
 var
-  OpenPos: TCodePosition;
-  ClosePos: TCodePosition;
   R: TRect;
   X: Integer;
   Box: TRect;
-  ThemeColors: TCodeEditorThemeColors;
 
   procedure PaintMatch(const Position: TCodePosition);
   begin
@@ -5062,36 +5455,26 @@ var
     if (Box.Right < R.Left) or (Box.Left > R.Right) then
       Exit;
     Canvas.Brush.Style := bsClear;
-    Canvas.Pen.Color := ThemeColors.SelectionBackground;
+    Canvas.Pen.Color := FPaintTheme.SelectionBackground;
     Canvas.Rectangle(Box);
     Canvas.Brush.Style := bsSolid;
   end;
-begin
-  if not MatchingBracketPosition(OpenPos, ClosePos) then
-    Exit;
 
-  ThemeColors := ActiveTheme;
-  try
-    PaintMatch(OpenPos);
-    PaintMatch(ClosePos);
-  finally
-    ThemeColors.Free;
-  end;
+begin
+  PaintMatch(OpenPos);
+  PaintMatch(ClosePos);
 end;
 
-procedure TCodeEditor.PaintOccurrenceHighlightsLine(ALineIndex, Y: Integer; const LineText: string);
+procedure TCodeEditor.PaintOccurrenceHighlightsLine(ALineIndex, Y: Integer;
+  const LineText, Needle: string);
 var
-  Needle: string;
   SearchStart: Integer;
   FoundAt: Integer;
   R: TRect;
   X1: Integer;
   X2: Integer;
   FillColor: TColor;
-  StartPos: TCodePosition;
-  EndPos: TCodePosition;
   Range: TCodeSelectionRange;
-  ThemeColors: TCodeEditorThemeColors;
 
   function SameRange(const AStart, AEnd, BStart, BEnd: TCodePosition): Boolean;
   begin
@@ -5119,36 +5502,21 @@ var
     end;
   end;
 begin
-  if not HasSelection then
-    Exit;
-
-  StartPos := SelectionStart;
-  EndPos := SelectionEnd;
-  if StartPos.Line <> EndPos.Line then
-    Exit;
-
-  Needle := GetSelectedText;
   if Needle = '' then
     Exit;
 
-  ThemeColors := ActiveTheme;
-  try
-    if IsDarkTheme(ThemeColors) then
-      FillColor := ShiftBrightness(ThemeColors.Background, 36)
-    else
-      FillColor := ShiftBrightness(ThemeColors.Background, -24);
-  finally
-    ThemeColors.Free;
-  end;
+  if IsDarkTheme(FPaintTheme) then
+    FillColor := ShiftBrightness(FPaintTheme.Background, 36)
+  else
+    FillColor := ShiftBrightness(FPaintTheme.Background, -24);
 
   R := ClientTextRect;
   SearchStart := 1;
   repeat
-    FoundAt := Pos(Needle, Copy(LineText, SearchStart, MaxInt));
+    FoundAt := PosEx(Needle, LineText, SearchStart);
     if FoundAt = 0 then
       Break;
 
-    Inc(FoundAt, SearchStart - 1);
     Range.Anchor := TCodePosition.Create(ALineIndex, FoundAt - 1);
     Range.Caret := TCodePosition.Create(ALineIndex, FoundAt - 1 + Length(Needle));
     if not IsActiveSelection(RangeStart(Range), RangeEnd(Range)) then
@@ -5194,52 +5562,101 @@ begin
   end;
 end;
 
-procedure TCodeEditor.PaintTokenText(const LineText: string; X, Y: Integer; ALineIndex: Integer);
+procedure TCodeEditor.PaintLineTokens(ALineIndex, X, Y: Integer; const LineText: string;
+  ForcedColor: TColor);
 var
   Tokens: TCodeTokenArray;
   Token: TCodeToken;
   Style: TCodeTextStyle;
   Text: string;
   TokenX: Integer;
-  ThemeColors: TCodeEditorThemeColors;
 begin
-  if Assigned(FHighlighter) then
-    Tokens := FHighlighter.TokenizeLine(LineText, ALineIndex)
-  else
-    SetLength(Tokens, 0);
-
   if not Assigned(FHighlighter) then
   begin
-    ThemeColors := ActiveTheme;
-    try
-      Canvas.Font.Color := ThemeColors.Text;
-      Canvas.TextOut(X - FLeftColumn * FCharWidth, Y, LineText);
-    finally
-      ThemeColors.Free;
-    end;
+    if ForcedColor <> clNone then
+      Canvas.Font.Color := ForcedColor
+    else
+      Canvas.Font.Color := FPaintTheme.Text;
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(X - FLeftColumn * FCharWidth, Y, LineText);
+    Canvas.Brush.Style := bsSolid;
     Exit;
   end;
 
-  ThemeColors := ActiveTheme;
-  try
-    for Token in Tokens do
-    begin
-      Text := Copy(LineText, Token.Start, Token.Length);
-      TokenX := X + (Token.Start - 1 - FLeftColumn) * FCharWidth;
-      Style := FHighlighter.Styles[Token.Kind];
-      if FOptions.ThemeSyntaxColors then
-        Style := TokenStyleForTheme(Token.Kind, Style, ThemeColors);
+  Tokens := LineTokens(ALineIndex);
+  for Token in Tokens do
+  begin
+    Text := Copy(LineText, Token.Start, Token.Length);
+    TokenX := X + (Token.Start - 1 - FLeftColumn) * FCharWidth;
+    Style := FHighlighter.Styles[Token.Kind];
+    if FOptions.ThemeSyntaxColors then
+      Style := TokenStyleForTheme(Token.Kind, Style, FPaintTheme);
+    if ForcedColor <> clNone then
+      Canvas.Font.Color := ForcedColor
+    else
       Canvas.Font.Color := Style.Foreground;
-      Canvas.Font.Style := Style.FontStyle;
-      Canvas.Brush.Style := bsClear;
-      Canvas.TextOut(TokenX, Y, Text);
-    end;
-  finally
-    ThemeColors.Free;
+    Canvas.Font.Style := Style.FontStyle;
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(TokenX, Y, Text);
   end;
 
   Canvas.Brush.Style := bsSolid;
   Canvas.Font.Style := Font.Style;
+end;
+
+procedure TCodeEditor.PaintSelectedTextLine(ALineIndex, X, Y: Integer; const LineText: string);
+var
+  R: TRect;
+  Range: TCodeSelectionRange;
+
+  // Redraws the selected slice of the line clipped to the selection rect,
+  // using the theme's SelectionText color so selected text stays readable.
+  procedure PaintRange(const AStart, AEnd: TCodePosition);
+  var
+    StartCol: Integer;
+    EndCol: Integer;
+    X1: Integer;
+    X2: Integer;
+    SaveIndex: Integer;
+  begin
+    if (ALineIndex < AStart.Line) or (ALineIndex > AEnd.Line) then
+      Exit;
+    if ComparePositions(AStart, AEnd) = 0 then
+      Exit;
+
+    StartCol := 0;
+    EndCol := Length(LineText);
+    if ALineIndex = AStart.Line then
+      StartCol := AStart.Column;
+    if ALineIndex = AEnd.Line then
+      EndCol := Min(EndCol, AEnd.Column);
+    if EndCol <= StartCol then
+      Exit;
+
+    X1 := Max(R.Left, R.Left + (StartCol - FLeftColumn) * FCharWidth);
+    X2 := Max(R.Left, R.Left + (EndCol - FLeftColumn) * FCharWidth);
+    if X2 <= X1 then
+      Exit;
+
+    SaveIndex := SaveDC(Canvas.Handle);
+    try
+      IntersectClipRect(Canvas.Handle, X1, Y - 1, X2, Y + FLineHeight - 1);
+      PaintLineTokens(ALineIndex, X, Y, LineText, FPaintTheme.SelectionText);
+    finally
+      RestoreDC(Canvas.Handle, SaveIndex);
+    end;
+  end;
+
+begin
+  if not HasSelection and not HasMultipleSelections then
+    Exit;
+
+  R := ClientTextRect;
+  if HasSelection then
+    PaintRange(SelectionStart, SelectionEnd);
+  if HasMultipleSelections then
+    for Range in FSelections do
+      PaintRange(RangeStart(Range), RangeEnd(Range));
 end;
 
 end.
