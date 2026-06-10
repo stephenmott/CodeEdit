@@ -100,6 +100,10 @@ apply at every caret.
 
 **Navigation** — `ShowLine(Line)` (0-based, alias for `TopLine`).
 
+**Zoom** — `ZoomIn`, `ZoomOut`, `ZoomReset` adjust `Font.Size` (clamped
+4–72). The size last set by the host is the baseline `ZoomReset` returns to;
+assigning `Font.Size` directly establishes a new baseline.
+
 **Commands** — `ExecuteCommand(Command: TCodeEditorCommand)` for host menus
 and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 `eccSelectAll`, `eccFind`, `eccReplace`, `eccToggleLineComment`,
@@ -139,6 +143,9 @@ and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 | Tab | Insert `TabSize` spaces; with a multi-line selection, indent the selected lines |
 | Shift+Tab | Unindent the current line / selected lines |
 | F5 or F9 | Toggle breakpoint on the caret line |
+| Ctrl+`+` / Ctrl+`-` (incl. numpad) | Zoom in / out |
+| Ctrl+0 | Reset zoom to the host-set font size |
+| Ctrl+mouse wheel | Zoom in / out |
 | Esc | In order: clear extra carets → hide signature help → close the search panel |
 | Backspace / Delete | Delete (multi-caret aware; joins lines at the edges) |
 

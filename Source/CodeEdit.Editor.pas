@@ -289,6 +289,8 @@ type
     FLineMarkers: TCodeLineMarkers;
     FExecutionLine: Integer;
     FDesiredColumn: Integer;
+    FBaseFontSize: Integer;
+    FZooming: Boolean;
     FMaxLineLength: Integer;
     FMaxLineLengthValid: Boolean;
     FPaintTheme: TCodeEditorThemeColors;
@@ -431,6 +433,7 @@ type
     procedure UpdateCaret;
     procedure UpdateMetrics;
     procedure UpdateGutterWidth;
+    procedure SetZoomFontSize(NewSize: Integer);
     procedure UpdateScrollBars;
     procedure EnsureLineStates(UpToLine: Integer);
     function LineTokens(ALineIndex: Integer): TCodeTokenArray;
@@ -507,6 +510,9 @@ type
     procedure ToggleLineComment;
     procedure IndentSelection;
     procedure UnindentSelection;
+    procedure ZoomIn;
+    procedure ZoomOut;
+    procedure ZoomReset;
     procedure AddNextSelectionOccurrence;
     procedure SelectAllSelectionOccurrences;
     procedure ClearMultipleSelections;
@@ -1155,6 +1161,10 @@ end;
 procedure TCodeEditor.CMFontChanged(var Message: TMessage);
 begin
   inherited;
+  // A font change from the host (not from zooming) establishes the size that
+  // ZoomReset returns to.
+  if not FZooming then
+    FBaseFontSize := Font.Size;
   UpdateMetrics;
   UpdateScrollBars;
   UpdateCaret;
@@ -1266,6 +1276,14 @@ var
 begin
   HideCompletion;
   HideSignatureHelp;
+  if (Message.Keys and MK_CONTROL) <> 0 then
+  begin
+    if Message.WheelDelta > 0 then
+      ZoomIn
+    else
+      ZoomOut;
+    Exit;
+  end;
   DeltaLines := Mouse.WheelScrollLines * -Sign(Message.WheelDelta);
   NewTop := EnsureRange(FTopLine + DeltaLines, 0, Max(0, FLines.Count - VisibleLineCount));
   if NewTop = FTopLine then
@@ -1324,6 +1342,35 @@ begin
     MeasureBitmap.Free;
   end;
   UpdateGutterWidth;
+end;
+
+procedure TCodeEditor.SetZoomFontSize(NewSize: Integer);
+begin
+  NewSize := EnsureRange(NewSize, 4, 72);
+  if NewSize = Font.Size then
+    Exit;
+  FZooming := True;
+  try
+    Font.Size := NewSize;  // CMFontChanged remeasures, rescrolls, repaints
+  finally
+    FZooming := False;
+  end;
+  EnsureCaretVisible;  // visible line/column counts changed with the metrics
+end;
+
+procedure TCodeEditor.ZoomIn;
+begin
+  SetZoomFontSize(Font.Size + 1);
+end;
+
+procedure TCodeEditor.ZoomOut;
+begin
+  SetZoomFontSize(Font.Size - 1);
+end;
+
+procedure TCodeEditor.ZoomReset;
+begin
+  SetZoomFontSize(FBaseFontSize);
 end;
 
 procedure TCodeEditor.UpdateGutterWidth;
@@ -4403,6 +4450,24 @@ begin
           Redo
         else
           Undo;
+        Key := 0;
+      end;
+    VK_OEM_PLUS, VK_ADD:
+      if ssCtrl in Shift then
+      begin
+        ZoomIn;
+        Key := 0;
+      end;
+    VK_OEM_MINUS, VK_SUBTRACT:
+      if ssCtrl in Shift then
+      begin
+        ZoomOut;
+        Key := 0;
+      end;
+    Ord('0'), VK_NUMPAD0:
+      if ssCtrl in Shift then
+      begin
+        ZoomReset;
         Key := 0;
       end;
     VK_F5, VK_F9:
