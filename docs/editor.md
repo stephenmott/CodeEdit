@@ -39,6 +39,7 @@ CodeEditor1.ToggleBreakpoint(CodeEditor1.Caret.Line + 1);
 | `ReadOnly` | `Boolean` | `False` | Blocks typing, paste, deletion, and editing methods such as `InsertText`. Copy still works. |
 | `Modified` | `Boolean` | `False` | Set on any edit. Undo restores the flag to its pre-edit value; reset it to `False` after saving. |
 | `MaxUndo` | `Integer` | `1024` | Maximum undo depth. Each entry snapshots the document, so lower this for very large files. |
+| `Zoom` | `Integer` | `100` | Display magnification in percent (25–400). Scales the rendered font without touching `Font`. `OnZoomChanged` fires when it changes. |
 | `ScrollBars` | `TScrollStyle` | `ssBoth` | Which axes scroll. |
 | `StyledScrollBars` | `Boolean` | `True` | Theme-matched scrollbars painted in the client area; `False` falls back to native Windows scrollbars. |
 | `Breakpoints` | `TCodeBreakpoints` | empty | Design-time editable collection; see [Breakpoints](breakpoints-markers.md). |
@@ -100,9 +101,11 @@ apply at every caret.
 
 **Navigation** — `ShowLine(Line)` (0-based, alias for `TopLine`).
 
-**Zoom** — `ZoomIn`, `ZoomOut`, `ZoomReset` adjust `Font.Size` (clamped
-4–72). The size last set by the host is the baseline `ZoomReset` returns to;
-assigning `Font.Size` directly establishes a new baseline.
+**Zoom** — `ZoomIn` / `ZoomOut` step the published `Zoom` percentage by 10,
+`ZoomReset` returns to 100. `Font` is never modified — the zoom scales the
+rendered size — so host font settings and zoom level are independent.
+`OnZoomChanged` fires on every change (keyboard, wheel, or code) for
+updating status bars or surrounding controls.
 
 **Commands** — `ExecuteCommand(Command: TCodeEditorCommand)` for host menus
 and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
@@ -122,6 +125,7 @@ and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 | `OnSelectionChange(Sender, SelStart, SelEnd)` | Selection changed (normalised: start ≤ end). |
 | `OnBreakpointsChanged` | User or code toggled breakpoints (not during streaming). |
 | `OnResolveTheme(Sender, Colors)` | Each paint, after the base palette is resolved — override individual colors here. |
+| `OnZoomChanged` | The `Zoom` percentage changed (keyboard, wheel, or code). |
 
 ## Keyboard reference
 
@@ -144,7 +148,7 @@ and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 | Shift+Tab | Unindent the current line / selected lines |
 | F5 or F9 | Toggle breakpoint on the caret line |
 | Ctrl+`+` / Ctrl+`-` (incl. numpad) | Zoom in / out |
-| Ctrl+0 | Reset zoom to the host-set font size |
+| Ctrl+0 | Reset zoom to 100% |
 | Ctrl+mouse wheel | Zoom in / out |
 | Esc | In order: clear extra carets → hide signature help → close the search panel |
 | Backspace / Delete | Delete (multi-caret aware; joins lines at the edges) |

@@ -6,10 +6,11 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
-- Zoom: `Ctrl+'+'` / `Ctrl+'-'` (main row and numpad), `Ctrl+0` to reset,
-  and `Ctrl+mouse wheel`, plus public `ZoomIn` / `ZoomOut` / `ZoomReset`
-  methods. Zooming adjusts `Font.Size` (clamped 4–72); the size set by the
-  host remains the reset baseline.
+- Zoom: published `Zoom` percentage property (25–400, default 100) with an
+  `OnZoomChanged` event so hosts can adjust surrounding controls. Bound to
+  `Ctrl+'+'` / `Ctrl+'-'` (main row and numpad), `Ctrl+0` to reset, and
+  `Ctrl+mouse wheel`; `ZoomIn` / `ZoomOut` / `ZoomReset` methods for menus.
+  Zoom scales the rendered font; the `Font` property itself is untouched.
 
 ## 0.2.0 — 2026-06-10
 

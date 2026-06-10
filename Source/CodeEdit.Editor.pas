@@ -289,8 +289,7 @@ type
     FLineMarkers: TCodeLineMarkers;
     FExecutionLine: Integer;
     FDesiredColumn: Integer;
-    FBaseFontSize: Integer;
-    FZooming: Boolean;
+    FZoom: Integer;
     FMaxLineLength: Integer;
     FMaxLineLengthValid: Boolean;
     FPaintTheme: TCodeEditorThemeColors;
@@ -301,6 +300,7 @@ type
     FOnResolveTheme: TCodeEditorResolveThemeEvent;
     FOnBreakpointsChanged: TNotifyEvent;
     FOnSelectionChange: TCodeEditorSelectionChangeEvent;
+    FOnZoomChanged: TNotifyEvent;
     procedure LinesChanged(Sender: TObject);
     procedure OptionsChanged(Sender: TObject);
     procedure ThemeChanged(Sender: TObject);
@@ -433,7 +433,8 @@ type
     procedure UpdateCaret;
     procedure UpdateMetrics;
     procedure UpdateGutterWidth;
-    procedure SetZoomFontSize(NewSize: Integer);
+    procedure SetZoom(Value: Integer);
+    function ScaledFontSize: Integer;
     procedure UpdateScrollBars;
     procedure EnsureLineStates(UpToLine: Integer);
     function LineTokens(ALineIndex: Integer): TCodeTokenArray;
@@ -551,6 +552,7 @@ type
     property Theme: TCodeEditorThemeColors read FTheme write SetTheme;
     property ThemeMode: TCodeEditorThemeMode read FThemeMode write SetThemeMode default ctmVclStyle;
     property MaxUndo: Integer read FMaxUndo write FMaxUndo default 1024;
+    property Zoom: Integer read FZoom write SetZoom default 100;
     property TabOrder;
     property TabStop default True;
     property OnCaretChange: TCodeEditorCaretChangeEvent read FOnCaretChange write FOnCaretChange;
@@ -569,6 +571,7 @@ type
     property OnMouseMove;
     property OnMouseUp;
     property OnSelectionChange: TCodeEditorSelectionChangeEvent read FOnSelectionChange write FOnSelectionChange;
+    property OnZoomChanged: TNotifyEvent read FOnZoomChanged write FOnZoomChanged;
   end;
 
 implementation
@@ -590,6 +593,9 @@ const
   MinimapLineHeight = 4;
   StyledScrollBarSize = 12;
   DefaultMaxPasteBytes = 64 * 1024 * 1024;
+  MinZoomPercent = 25;
+  MaxZoomPercent = 400;
+  ZoomStepPercent = 10;
 
 constructor TCodeEditorThemeColors.Create;
 begin
@@ -1096,6 +1102,7 @@ begin
   FLineTokenCache := TDictionary<Integer, TCodeLineTokensEntry>.Create;
   FExecutionLine := -1;
   FDesiredColumn := -1;
+  FZoom := 100;
   FMaxUndo := 1024;
   FModified := False;
   FReadOnly := False;
@@ -1161,10 +1168,6 @@ end;
 procedure TCodeEditor.CMFontChanged(var Message: TMessage);
 begin
   inherited;
-  // A font change from the host (not from zooming) establishes the size that
-  // ZoomReset returns to.
-  if not FZooming then
-    FBaseFontSize := Font.Size;
   UpdateMetrics;
   UpdateScrollBars;
   UpdateCaret;
@@ -1336,6 +1339,7 @@ begin
   MeasureCanvas := MeasureBitmap.Canvas;
   try
     MeasureCanvas.Font.Assign(Font);
+    MeasureCanvas.Font.Size := ScaledFontSize;
     FLineHeight := Max(1, MeasureCanvas.TextHeight('Wg') + 2);
     FCharWidth := Max(1, MeasureCanvas.TextWidth('M'));
   finally
@@ -1344,33 +1348,40 @@ begin
   UpdateGutterWidth;
 end;
 
-procedure TCodeEditor.SetZoomFontSize(NewSize: Integer);
+function TCodeEditor.ScaledFontSize: Integer;
 begin
-  NewSize := EnsureRange(NewSize, 4, 72);
-  if NewSize = Font.Size then
+  Result := Max(1, MulDiv(Font.Size, FZoom, 100));
+end;
+
+procedure TCodeEditor.SetZoom(Value: Integer);
+begin
+  Value := EnsureRange(Value, MinZoomPercent, MaxZoomPercent);
+  if Value = FZoom then
     Exit;
-  FZooming := True;
-  try
-    Font.Size := NewSize;  // CMFontChanged remeasures, rescrolls, repaints
-  finally
-    FZooming := False;
-  end;
+
+  FZoom := Value;
+  UpdateMetrics;
+  UpdateScrollBars;
+  UpdateCaret;
   EnsureCaretVisible;  // visible line/column counts changed with the metrics
+  Invalidate;
+  if Assigned(FOnZoomChanged) then
+    FOnZoomChanged(Self);
 end;
 
 procedure TCodeEditor.ZoomIn;
 begin
-  SetZoomFontSize(Font.Size + 1);
+  Zoom := FZoom + ZoomStepPercent;
 end;
 
 procedure TCodeEditor.ZoomOut;
 begin
-  SetZoomFontSize(Font.Size - 1);
+  Zoom := FZoom - ZoomStepPercent;
 end;
 
 procedure TCodeEditor.ZoomReset;
 begin
-  SetZoomFontSize(FBaseFontSize);
+  Zoom := 100;
 end;
 
 procedure TCodeEditor.UpdateGutterWidth;
@@ -5124,6 +5135,7 @@ begin
     Canvas.Brush.Color := FPaintTheme.Background;
     Canvas.FillRect(ClientRect);
     Canvas.Font.Assign(Font);
+    Canvas.Font.Size := ScaledFontSize;
     Canvas.Font.Color := FPaintTheme.Text;
     PaintGutter;
     PaintText;
