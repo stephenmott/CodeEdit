@@ -6,8 +6,8 @@ object Form2: TForm2
   Margins.Right = 6
   Margins.Bottom = 6
   Caption = 'Form2'
-  ClientHeight = 1085
-  ClientWidth = 1299
+  ClientHeight = 1210
+  ClientWidth = 1660
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -21,8 +21,8 @@ object Form2: TForm2
   object CodeEditor1: TCodeEditor
     Left = 0
     Top = 82
-    Width = 1299
-    Height = 965
+    Width = 1660
+    Height = 1090
     Margins.Left = 6
     Margins.Top = 6
     Margins.Right = 6
@@ -49,22 +49,25 @@ object Form2: TForm2
         Line = 15
       end>
     OnKeyDown = CodeEditor1KeyDown
+    ExplicitTop = 74
   end
   object StatusBar1: TStatusBar
     Left = 0
-    Top = 1047
-    Width = 1299
+    Top = 1172
+    Width = 1660
     Height = 38
     Margins.Left = 6
     Margins.Top = 6
     Margins.Right = 6
     Margins.Bottom = 6
     Panels = <>
+    ExplicitLeft = 64
+    ExplicitTop = 996
   end
   object Panel1: TPanel
     Left = 0
     Top = 0
-    Width = 1299
+    Width = 1660
     Height = 82
     Margins.Left = 6
     Margins.Top = 6
@@ -110,45 +113,45 @@ object Form2: TForm2
     end
   end
   object DelphiCodeHighlighter1: TDelphiCodeHighlighter
-    Left = 256
-    Top = 352
+    Left = 208
+    Top = 272
   end
   object JavaScriptCodeHighlighter1: TJavaScriptCodeHighlighter
-    Left = 256
-    Top = 464
+    Left = 208
+    Top = 400
   end
   object SqlCodeHighlighter1: TSqlCodeHighlighter
-    Left = 256
-    Top = 592
+    Left = 208
+    Top = 544
   end
   object KeywordCompletionProvider1: TKeywordCompletionProvider
     OnGetCompletions = KeywordCompletionProvider1GetCompletions
     OnGetSignatureHelp = KeywordCompletionProvider1GetSignatureHelp
-    Left = 480
+    Left = 400
     Top = 128
   end
   object PythonCodeHighlighter1: TPythonCodeHighlighter
-    Left = 624
-    Top = 736
-  end
-  object YamlCodeHighlighter1: TYamlCodeHighlighter
-    Left = 624
-    Top = 608
-  end
-  object IniCodeHighlighter1: TIniCodeHighlighter
-    Left = 624
-    Top = 496
-  end
-  object PowerShellCodeHighlighter1: TPowerShellCodeHighlighter
-    Left = 624
-    Top = 368
-  end
-  object BatchCodeHighlighter1: TBatchCodeHighlighter
-    Left = 256
+    Left = 208
     Top = 832
   end
+  object YamlCodeHighlighter1: TYamlCodeHighlighter
+    Left = 592
+    Top = 544
+  end
+  object IniCodeHighlighter1: TIniCodeHighlighter
+    Left = 576
+    Top = 384
+  end
+  object PowerShellCodeHighlighter1: TPowerShellCodeHighlighter
+    Left = 576
+    Top = 256
+  end
+  object BatchCodeHighlighter1: TBatchCodeHighlighter
+    Left = 592
+    Top = 688
+  end
   object TungliCodeHighlighter1: TTungliCodeHighlighter
-    Left = 256
-    Top = 704
+    Left = 208
+    Top = 688
   end
 end
