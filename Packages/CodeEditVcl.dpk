@@ -31,12 +31,15 @@ package CodeEditVcl;
 
 requires
   rtl,
-  vcl;
+  vcl,
+  designide;
 
 contains
   CodeEdit.Completion in '..\Source\CodeEdit.Completion.pas',
   CodeEdit.Editor in '..\Source\CodeEdit.Editor.pas',
   CodeEdit.Highlighter in '..\Source\CodeEdit.Highlighter.pas',
+  CodeEdit.Templates in '..\Source\CodeEdit.Templates.pas',
+  CodeEdit.TemplateEditorDlg in '..\Source\CodeEdit.TemplateEditorDlg.pas',
   CodeEdit.Register in '..\Source\CodeEdit.Register.pas';
 
 end.

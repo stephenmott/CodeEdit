@@ -1,5 +1,6 @@
 TCODEEDITOR                BITMAP "TCodeEditor.bmp"
 TKEYWORDCOMPLETIONPROVIDER BITMAP "TKeywordCompletionProvider.bmp"
+TCODETEMPLATEPROVIDER      BITMAP "TCodeTemplateProvider.bmp"
 TDELPHICODEHIGHLIGHTER     BITMAP "TDelphiCodeHighlighter.bmp"
 TJAVASCRIPTCODEHIGHLIGHTER BITMAP "TJavaScriptCodeHighlighter.bmp"
 TSQLCODEHIGHLIGHTER        BITMAP "TSqlCodeHighlighter.bmp"

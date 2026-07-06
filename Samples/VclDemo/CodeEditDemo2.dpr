@@ -10,7 +10,8 @@ uses
 
 begin
   Application.Initialize;
-  TStyleManager.TrySetStyle('Windows11 Modern Dark');
+  if not TStyleManager.TrySetStyle('Windows Modern Dark') then
+    TStyleManager.TrySetStyle('Windows11 Modern Dark');
   Application.CreateForm(TForm2, Form2);
   Application.Run;
 end.

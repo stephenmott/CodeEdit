@@ -42,6 +42,11 @@ type
     procedure SetDefaultStyles; virtual;
   public
     constructor Create(AOwner: TComponent); override;
+    // Human-readable language identifier, used to group code templates and
+    // similar per-language data. Defaults to the class name without the 'T'
+    // prefix and 'CodeHighlighter' suffix, e.g. TDelphiCodeHighlighter ->
+    // 'Delphi'. Override for casing the derivation cannot produce ('SQL').
+    class function LanguageName: string; virtual;
     function TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray; virtual;
     // Stateful tokenization for constructs that span lines (block comments,
     // multi-line strings). StartState is the state the previous line ended in;
@@ -50,6 +55,8 @@ type
       out EndState: Integer): TCodeTokenArray; virtual;
     property Styles[Kind: TCodeTokenKind]: TCodeTextStyle read GetStyle write SetStyle;
   end;
+
+  TCodeHighlighterClass = class of TCustomCodeHighlighter;
 
   // A construct that may span lines, e.g. '(*' .. '*)' or '"""' .. '"""'.
   // Its 1-based index in the registration order is the line state value used
@@ -118,6 +125,8 @@ type
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
+  public
+    class function LanguageName: string; override;
   end;
 
   TTungliCodeHighlighter = class(TCustomWordCodeHighlighter)
@@ -152,6 +161,8 @@ type
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
+  public
+    class function LanguageName: string; override;
   end;
 
   TYamlCodeHighlighter = class(TCustomWordCodeHighlighter)
@@ -160,6 +171,8 @@ type
     function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
     function IsStringStart(Ch: Char): Boolean; override;
     function ReadString(const ALine: string; Index: Integer): Integer; override;
+  public
+    class function LanguageName: string; override;
   end;
 
   TPythonCodeHighlighter = class(TCustomWordCodeHighlighter)
@@ -212,6 +225,23 @@ constructor TCustomCodeHighlighter.Create(AOwner: TComponent);
 begin
   inherited;
   SetDefaultStyles;
+end;
+
+class function TCustomCodeHighlighter.LanguageName: string;
+const
+  Suffixes: array[0..1] of string = ('CodeHighlighter', 'Highlighter');
+var
+  Suffix: string;
+begin
+  Result := ClassName;
+  if (Result <> '') and (Result[1] = 'T') then
+    Delete(Result, 1, 1);
+  for Suffix in Suffixes do
+    if EndsText(Suffix, Result) and (Length(Result) > Length(Suffix)) then
+    begin
+      SetLength(Result, Length(Result) - Length(Suffix));
+      Break;
+    end;
 end;
 
 procedure TCustomCodeHighlighter.SetDefaultStyles;
@@ -1029,6 +1059,21 @@ begin
     end;
     Inc(Result);
   end;
+end;
+
+class function TSqlCodeHighlighter.LanguageName: string;
+begin
+  Result := 'SQL';
+end;
+
+class function TIniCodeHighlighter.LanguageName: string;
+begin
+  Result := 'INI';
+end;
+
+class function TYamlCodeHighlighter.LanguageName: string;
+begin
+  Result := 'YAML';
 end;
 
 end.

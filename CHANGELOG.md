@@ -6,6 +6,26 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Code templates (Ctrl+J): new `CodeEdit.Templates` unit with a
+  `TCodeTemplateProvider` component holding a published `Templates` collection
+  (`Name`, `Description`, `Language`, `Code`). Assign it to the editor's new
+  `TemplateProvider` property and `Ctrl+J` pops up the templates for the active
+  highlighter's language (typing filters the list; Enter/Tab/double-click
+  inserts, Esc dismisses). A word typed before `Ctrl+J` is used as a prefix —
+  a unique match expands immediately, Delphi-IDE style. Inserted lines inherit
+  the current line's indentation; `|` in the template body marks where the
+  caret lands (`||` for a literal `|`). Also `TriggerTemplates` /
+  `InsertTemplate` methods, an `eccTriggerTemplates` command, and JSON
+  persistence via `LoadFromFile` / `SaveToFile` on the provider.
+- Template editor dialog (`CodeEdit.TemplateEditorDlg`,
+  `TCodeTemplateEditorDialog.Execute`) for end users to create, edit,
+  duplicate, and delete templates, with per-language filtering and live
+  syntax-highlighted editing of the template body. Wired up at design time as
+  the `TCodeTemplateProvider` component editor ("Edit Templates...") — the
+  package now requires `designide`.
+- `TCustomCodeHighlighter.LanguageName` class function identifying each
+  highlighter's language ('Delphi', 'SQL', ...); used to key templates and
+  available for host apps.
 - Zoom: published `Zoom` percentage property (25–400, default 100) with an
   `OnZoomChanged` event so hosts can adjust surrounding controls. Bound to
   `Ctrl+'+'` / `Ctrl+'-'` (main row and numpad), `Ctrl+0` to reset, and

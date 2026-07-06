@@ -142,6 +142,7 @@ and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 | Ctrl+F / Ctrl+H | Find / replace panel |
 | Ctrl+Space | Trigger completion |
 | Ctrl+Shift+Space | Trigger signature help |
+| Ctrl+J | Code templates popup; a unique name prefix before the caret expands immediately (see [templates](templates.md)) |
 | Ctrl+D | Add next occurrence of the selection as another caret |
 | Ctrl+Shift+L | Select all occurrences |
 | Tab | Insert `TabSize` spaces; with a multi-line selection, indent the selected lines |
@@ -150,7 +151,7 @@ and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 | Ctrl+`+` / Ctrl+`-` (incl. numpad) | Zoom in / out |
 | Ctrl+0 | Reset zoom to 100% |
 | Ctrl+mouse wheel | Zoom in / out |
-| Esc | In order: clear extra carets → hide signature help → close the search panel |
+| Esc | Closes the completion or template popup if open; otherwise in order: clear extra carets → hide signature help → close the search panel |
 | Backspace / Delete | Delete (multi-caret aware; joins lines at the edges) |
 
 Inside the search panel: `Enter` next match, `Shift+Enter` previous,

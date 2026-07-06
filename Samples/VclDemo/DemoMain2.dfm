@@ -48,7 +48,6 @@ object Form2: TForm2
       item
         Line = 15
       end>
-    OnKeyDown = CodeEditor1KeyDown
     ExplicitLeft = 216
   end
   object StatusBar1: TStatusBar
@@ -108,6 +107,19 @@ object Form2: TForm2
       Caption = 'Read-Only'
       TabOrder = 1
       OnClick = CheckBox1Click
+    end
+    object ButtonTemplates: TButton
+      Left = 656
+      Top = 18
+      Width = 240
+      Height = 50
+      Margins.Left = 6
+      Margins.Top = 6
+      Margins.Right = 6
+      Margins.Bottom = 6
+      Caption = 'Templates... (Ctrl+J)'
+      TabOrder = 2
+      OnClick = ButtonTemplatesClick
     end
   end
   object DelphiCodeHighlighter1: TDelphiCodeHighlighter

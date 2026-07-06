@@ -16,7 +16,8 @@ uses
   Winapi.Messages,
   Winapi.Windows,
   CodeEdit.Completion,
-  CodeEdit.Highlighter;
+  CodeEdit.Highlighter,
+  CodeEdit.Templates;
 
 type
   TCodeEditorThemeMode = (ctmManual, ctmVclStyle);
@@ -152,7 +153,8 @@ type
     eccCommentSelection,
     eccUncommentSelection,
     eccTriggerCompletion,
-    eccTriggerSignatureHelp
+    eccTriggerSignatureHelp,
+    eccTriggerTemplates
   );
 
   TCodeLineMarkerKind = (lmkExecutable, lmkError, lmkWarning, lmkInfo);
@@ -254,6 +256,12 @@ type
     FSignatureLabel: TLabel;
     FSignatureItems: TCodeSignatureItems;
     FSignatureContext: TCodeSignatureHelpContext;
+    FTemplateProvider: TCodeTemplateProvider;
+    FTemplateForm: TForm;
+    FTemplateList: TListBox;
+    FTemplateMatches: TList<TCodeTemplate>;
+    FTemplateStart: TCodePosition;
+    FTemplateEnd: TCodePosition;
     FSearchPanel: TPanel;
     FSearchExpandButton: TSpeedButton;
     FSearchEdit: TEdit;
@@ -391,6 +399,17 @@ type
     procedure CompletionListClick(Sender: TObject);
     procedure CompletionListDblClick(Sender: TObject);
     procedure MoveCompletionSelection(Delta: Integer);
+    procedure SetTemplateProvider(Value: TCodeTemplateProvider);
+    function TemplatesVisible: Boolean;
+    function TemplateDisplayText(Template: TCodeTemplate): string;
+    procedure CreateTemplatePopup;
+    procedure PopulateTemplatePopup;
+    procedure ShowTemplates(ExplicitRequest: Boolean);
+    procedure HideTemplates;
+    procedure AcceptTemplate;
+    procedure TemplateListDblClick(Sender: TObject);
+    procedure MoveTemplateSelection(Delta: Integer);
+    procedure InsertTemplateRange(Template: TCodeTemplate; const StartPos, EndPos: TCodePosition);
     procedure CreateSignaturePopup;
     procedure ShowSignatureHelp(TriggerChar: Char; ExplicitRequest: Boolean);
     procedure UpdateSignatureHelp(TriggerChar: Char);
@@ -503,6 +522,9 @@ type
     procedure ExecuteCommand(Command: TCodeEditorCommand);
     procedure TriggerCompletion;
     procedure TriggerSignatureHelp;
+    procedure TriggerTemplates;
+    procedure InsertTemplate(Template: TCodeTemplate);
+    function ActiveLanguageName: string;
     procedure ShowFind;
     procedure ShowReplace;
     procedure InsertText(const Value: string; AddUndo: Boolean = True);
@@ -549,6 +571,7 @@ type
     property ReadOnly: Boolean read FReadOnly write SetReadOnly default False;
     property ScrollBars: System.UITypes.TScrollStyle read FScrollBars write SetScrollBars default ssBoth;
     property StyledScrollBars: Boolean read FStyledScrollBars write SetStyledScrollBars default True;
+    property TemplateProvider: TCodeTemplateProvider read FTemplateProvider write SetTemplateProvider;
     property Theme: TCodeEditorThemeColors read FTheme write SetTheme;
     property ThemeMode: TCodeEditorThemeMode read FThemeMode write SetThemeMode default ctmVclStyle;
     property MaxUndo: Integer read FMaxUndo write FMaxUndo default 1024;
@@ -1123,10 +1146,13 @@ begin
   CancelUndoGroup;
   HideCompletion;
   HideSignatureHelp;
+  HideTemplates;
   FCompletionForm.Free;
   FCompletionItems.Free;
   FSignatureItems.Free;
   FSignatureForm.Free;
+  FTemplateForm.Free;
+  FTemplateMatches.Free;
   FSearchMatches.Free;
   FSelections.Free;
   FBreakpoints.Free;
@@ -1250,7 +1276,7 @@ function TCodeEditor.WindowInPopups(Wnd: HWND): Boolean;
   end;
 
 begin
-  Result := InForm(FCompletionForm) or InForm(FSignatureForm);
+  Result := InForm(FCompletionForm) or InForm(FSignatureForm) or InForm(FTemplateForm);
 end;
 
 procedure TCodeEditor.WMKillFocus(var Message: TWMKillFocus);
@@ -1260,6 +1286,7 @@ begin
   begin
     HideCompletion;
     HideSignatureHelp;
+    HideTemplates;
   end;
   inherited;
 end;
@@ -1268,6 +1295,7 @@ procedure TCodeEditor.WMPaste(var Message: TWMPaste);
 begin
   HideCompletion;
   HideSignatureHelp;
+  HideTemplates;
   PasteFromClipboard;
   Message.Result := 0;
 end;
@@ -1279,6 +1307,7 @@ var
 begin
   HideCompletion;
   HideSignatureHelp;
+  HideTemplates;
   if (Message.Keys and MK_CONTROL) <> 0 then
   begin
     if Message.WheelDelta > 0 then
@@ -2494,6 +2523,8 @@ begin
       TriggerCompletion;
     eccTriggerSignatureHelp:
       TriggerSignatureHelp;
+    eccTriggerTemplates:
+      TriggerTemplates;
   end;
 end;
 
@@ -2546,6 +2577,8 @@ var
 begin
   if not Assigned(FCompletionProvider) then
     Exit;
+
+  HideTemplates;
 
   Prefix := CompletionPrefix;
   FCompletionStart := FCaret;
@@ -2648,6 +2681,235 @@ begin
 
   NewIndex := EnsureRange(FCompletionList.ItemIndex + Delta, 0, FCompletionList.Items.Count - 1);
   FCompletionList.ItemIndex := NewIndex;
+end;
+
+function TCodeEditor.ActiveLanguageName: string;
+begin
+  if Assigned(FHighlighter) then
+    Result := FHighlighter.LanguageName
+  else
+    Result := '';
+end;
+
+function TCodeEditor.TemplatesVisible: Boolean;
+begin
+  Result := Assigned(FTemplateForm) and FTemplateForm.Visible;
+end;
+
+function TCodeEditor.TemplateDisplayText(Template: TCodeTemplate): string;
+begin
+  Result := Template.Name;
+  if Template.Description <> '' then
+    Result := Result + '    ' + Template.Description;
+end;
+
+procedure TCodeEditor.CreateTemplatePopup;
+begin
+  if Assigned(FTemplateForm) then
+    Exit;
+
+  FTemplateForm := TForm.CreateNew(nil);
+  FTemplateForm.BorderStyle := bsNone;
+  FTemplateForm.BorderIcons := [];
+  // pmExplicit keeps the popup above its owning form only, instead of the
+  // process-wide topmost that fsStayOnTop would impose.
+  FTemplateForm.PopupMode := pmExplicit;
+  FTemplateForm.Position := poDesigned;
+  FTemplateForm.Width := 480;
+  FTemplateForm.Height := 280;
+
+  FTemplateList := TListBox.Create(FTemplateForm);
+  FTemplateList.Parent := FTemplateForm;
+  FTemplateList.Align := alClient;
+  FTemplateList.IntegralHeight := False;
+  FTemplateList.OnClick := CompletionListClick;
+  FTemplateList.OnDblClick := TemplateListDblClick;
+end;
+
+procedure TCodeEditor.PopulateTemplatePopup;
+var
+  Template: TCodeTemplate;
+begin
+  FTemplateList.Items.BeginUpdate;
+  try
+    FTemplateList.Clear;
+    for Template in FTemplateMatches do
+      FTemplateList.Items.AddObject(TemplateDisplayText(Template), Template);
+    if FTemplateList.Items.Count > 0 then
+      FTemplateList.ItemIndex := 0;
+  finally
+    FTemplateList.Items.EndUpdate;
+  end;
+end;
+
+procedure TCodeEditor.ShowTemplates(ExplicitRequest: Boolean);
+var
+  Prefix: string;
+  P: TPoint;
+  PopupHeight: Integer;
+begin
+  if FReadOnly or not Assigned(FTemplateProvider) then
+    Exit;
+
+  HideCompletion;
+  HideSignatureHelp;
+
+  Prefix := CompletionPrefix;
+  FTemplateStart := FCaret;
+  Dec(FTemplateStart.Column, Length(Prefix));
+  FTemplateEnd := FCaret;
+
+  if not Assigned(FTemplateMatches) then
+    FTemplateMatches := TList<TCodeTemplate>.Create;
+  FTemplateMatches.Clear;
+  FTemplateProvider.GetTemplates(ActiveLanguageName, Prefix, FTemplateMatches);
+
+  if (FTemplateMatches.Count = 0) and (Prefix <> '') and ExplicitRequest then
+  begin
+    // Nothing starts with the word at the caret: offer the full list and
+    // leave the word alone.
+    FTemplateStart := FCaret;
+    FTemplateProvider.GetTemplates(ActiveLanguageName, '', FTemplateMatches);
+  end;
+
+  if FTemplateMatches.Count = 0 then
+  begin
+    HideTemplates;
+    Exit;
+  end;
+
+  if ExplicitRequest and (Prefix <> '') and (FTemplateMatches.Count = 1) and
+    (FTemplateStart.Column < FTemplateEnd.Column) then
+  begin
+    // Unique match for the typed word: expand it immediately, like the IDE.
+    HideTemplates;
+    InsertTemplateRange(FTemplateMatches[0], FTemplateStart, FTemplateEnd);
+    Exit;
+  end;
+
+  CreateTemplatePopup;
+  PopulateTemplatePopup;
+  PopupHeight := FTemplateList.ItemHeight * Min(FTemplateMatches.Count, 12) + 8;
+  FTemplateForm.PopupParent := GetParentForm(Self);
+  P := ClientToScreen(CaretToPoint(FCaret));
+  Inc(P.Y, FLineHeight);
+  FTemplateForm.SetBounds(P.X, P.Y, FTemplateForm.Width, Max(PopupHeight, FTemplateList.ItemHeight + 8));
+  FTemplateForm.Show;
+  SetFocus;
+end;
+
+procedure TCodeEditor.HideTemplates;
+begin
+  if Assigned(FTemplateForm) then
+    FTemplateForm.Hide;
+end;
+
+procedure TCodeEditor.AcceptTemplate;
+var
+  Template: TCodeTemplate;
+begin
+  if not TemplatesVisible or (FTemplateList.ItemIndex < 0) then
+    Exit;
+
+  Template := TCodeTemplate(FTemplateList.Items.Objects[FTemplateList.ItemIndex]);
+  HideTemplates;
+  InsertTemplateRange(Template, FTemplateStart, FTemplateEnd);
+end;
+
+procedure TCodeEditor.TemplateListDblClick(Sender: TObject);
+begin
+  AcceptTemplate;
+end;
+
+procedure TCodeEditor.MoveTemplateSelection(Delta: Integer);
+var
+  NewIndex: Integer;
+begin
+  if not TemplatesVisible or (FTemplateList.Items.Count = 0) then
+    Exit;
+
+  NewIndex := EnsureRange(FTemplateList.ItemIndex + Delta, 0, FTemplateList.Items.Count - 1);
+  FTemplateList.ItemIndex := NewIndex;
+end;
+
+procedure TCodeEditor.InsertTemplateRange(Template: TCodeTemplate;
+  const StartPos, EndPos: TCodePosition);
+var
+  UndoItem: TCodeUndoItem;
+  SPos: TCodePosition;
+  EPos: TCodePosition;
+  LineText: string;
+  Indent: string;
+  Expanded: string;
+  CaretLine: Integer;
+  CaretColumn: Integer;
+  HasCaret: Boolean;
+  I: Integer;
+begin
+  if FReadOnly or not Assigned(Template) then
+    Exit;
+
+  SPos := NormalizePosition(StartPos);
+  EPos := NormalizePosition(EndPos);
+
+  FinishUndoGroup;
+  UndoItem := CaptureUndoState;
+
+  ClearExtraSelections;
+  if ComparePositions(SPos, EPos) < 0 then
+  begin
+    // Consume the typed prefix the template was matched against.
+    FAnchor := SPos;
+    FCaret := EPos;
+    DeleteSelection;
+  end
+  else
+  begin
+    FCaret := SPos;
+    FAnchor := SPos;
+  end;
+
+  // Continuation lines inherit the current line's leading whitespace.
+  LineText := FLines[FCaret.Line];
+  Indent := '';
+  I := 1;
+  while (I <= Length(LineText)) and CharInSet(LineText[I], [' ', #9]) do
+  begin
+    Indent := Indent + LineText[I];
+    Inc(I);
+  end;
+
+  Expanded := ExpandCodeTemplate(Template.Code.Text, Indent, CaretLine, CaretColumn, HasCaret);
+  SPos := FCaret;
+  InsertText(Expanded, False);
+
+  if HasCaret then
+  begin
+    if CaretLine = 0 then
+      FCaret := TCodePosition.Create(SPos.Line, SPos.Column + CaretColumn)
+    else
+      FCaret := TCodePosition.Create(SPos.Line + CaretLine, CaretColumn);
+    FCaret := NormalizePosition(FCaret);
+    FAnchor := FCaret;
+    EnsureCaretVisible;
+    Invalidate;
+  end;
+
+  CommitUndoState(UndoItem);
+end;
+
+procedure TCodeEditor.InsertTemplate(Template: TCodeTemplate);
+begin
+  if HasSelection then
+    InsertTemplateRange(Template, SelectionStart, SelectionEnd)
+  else
+    InsertTemplateRange(Template, FCaret, FCaret);
+end;
+
+procedure TCodeEditor.TriggerTemplates;
+begin
+  FinishUndoGroup;
+  ShowTemplates(True);
 end;
 
 procedure TCodeEditor.CreateSignaturePopup;
@@ -3431,6 +3693,17 @@ begin
   end;
 end;
 
+procedure TCodeEditor.SetTemplateProvider(Value: TCodeTemplateProvider);
+begin
+  if FTemplateProvider <> Value then
+  begin
+    HideTemplates;
+    FTemplateProvider := Value;
+    if Assigned(FTemplateProvider) then
+      FTemplateProvider.FreeNotification(Self);
+  end;
+end;
+
 procedure TCodeEditor.Notification(AComponent: TComponent; Operation: TOperation);
 begin
   inherited;
@@ -3446,6 +3719,11 @@ begin
       HideCompletion;
       HideSignatureHelp;
       FCompletionProvider := nil;
+    end;
+    if AComponent = FTemplateProvider then
+    begin
+      HideTemplates;
+      FTemplateProvider := nil;
     end;
   end;
 end;
@@ -4303,6 +4581,37 @@ begin
     end;
   end;
 
+  if TemplatesVisible then
+  begin
+    case Key of
+      VK_ESCAPE:
+        begin
+          HideTemplates;
+          Key := 0;
+          Exit;
+        end;
+      VK_UP:
+        begin
+          MoveTemplateSelection(-1);
+          Key := 0;
+          Exit;
+        end;
+      VK_DOWN:
+        begin
+          MoveTemplateSelection(1);
+          Key := 0;
+          Exit;
+        end;
+      VK_RETURN, VK_TAB:
+        begin
+          AcceptTemplate;
+          FSuppressKeyPress := True;
+          Key := 0;
+          Exit;
+        end;
+    end;
+  end;
+
   if HasMultipleSelections and not (ssCtrl in Shift) and not (ssAlt in Shift) and
     (Key in [VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_HOME, VK_END, VK_PRIOR, VK_NEXT]) then
   begin
@@ -4361,6 +4670,7 @@ begin
         end;
         HideCompletion;
         HideSignatureHelp;
+        HideTemplates;
         if HasMultipleSelections then
         begin
           DeleteAllSelections(False);
@@ -4429,11 +4739,20 @@ begin
         ShowReplace;
         Key := 0;
       end;
+    Ord('J'):
+      if Shift = [ssCtrl] then
+      begin
+        TriggerTemplates;
+        // Ctrl+J arrives in KeyPress as the #10 control character.
+        FSuppressKeyPress := True;
+        Key := 0;
+      end;
     Ord('V'):
       if ssCtrl in Shift then
       begin
         HideCompletion;
         HideSignatureHelp;
+        HideTemplates;
         PasteFromClipboard;
         FSuppressKeyPress := True;
         Key := 0;
@@ -4524,6 +4843,7 @@ begin
       begin
         HideCompletion;
         HideSignatureHelp;
+        HideTemplates;
         PasteFromClipboard;
         Key := #0;
       end;
@@ -4536,6 +4856,7 @@ begin
           Exit;
         end;
         HideCompletion;
+        HideTemplates;
         if HasMultipleSelections then
         begin
           DeleteAllSelections(True);
@@ -4578,6 +4899,7 @@ begin
           Exit;
         end;
         HideCompletion;
+        HideTemplates;
         FinishUndoGroup;
         if HasSelection and (SelectionStart.Line <> SelectionEnd.Line) then
           IndentSelection
@@ -4595,6 +4917,7 @@ begin
         end;
         HideCompletion;
         HideSignatureHelp;
+        HideTemplates;
         FinishUndoGroup;
         InsertText(sLineBreak);
         Key := #0;
@@ -4605,16 +4928,22 @@ begin
     if Key >= #32 then
     begin
       InsertTypedText(Key);
-      if CharInSet(Key, ['.', '(', '<']) then
+      if TemplatesVisible then
+        // Keep narrowing the template list while the user types.
+        ShowTemplates(False)
+      else
       begin
-        ShowCompletion(Key, False)
-      end
-      else if CompletionVisible then
-        ShowCompletion(#0, False);
-      if CharInSet(Key, ['(', '<']) then
-        ShowSignatureHelp(Key, False)
-      else if Key = ',' then
-        UpdateSignatureHelp(Key);
+        if CharInSet(Key, ['.', '(', '<']) then
+        begin
+          ShowCompletion(Key, False)
+        end
+        else if CompletionVisible then
+          ShowCompletion(#0, False);
+        if CharInSet(Key, ['(', '<']) then
+          ShowSignatureHelp(Key, False)
+        else if Key = ',' then
+          UpdateSignatureHelp(Key);
+      end;
       Key := #0;
     end;
   end;
@@ -4630,6 +4959,7 @@ begin
   begin
     SetFocus;
     HideCompletion;
+    HideTemplates;
     if MinimapVisible and PtInRect(MinimapRect, Point(X, Y)) then
     begin
       FMinimapDragging := True;

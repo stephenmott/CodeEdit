@@ -6,7 +6,8 @@ USES
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.StdCtrls, Vcl.ExtCtrls,
 
-  CodeEdit.Editor, CodeEdit.Completion, CodeEdit.Highlighter;
+  CodeEdit.Editor, CodeEdit.Completion, CodeEdit.Highlighter, CodeEdit.Templates,
+  CodeEdit.TemplateEditorDlg;
 
 CONST
   cDelphi           =
@@ -296,6 +297,7 @@ TYPE
     Panel1: TPanel;
     ComboBox1: TComboBox;
     CheckBox1: TCheckBox;
+    ButtonTemplates: TButton;
     KeywordCompletionProvider1: TKeywordCompletionProvider;
     PythonCodeHighlighter1: TPythonCodeHighlighter;
     YamlCodeHighlighter1: TYamlCodeHighlighter;
@@ -305,9 +307,8 @@ TYPE
     TungliCodeHighlighter1: TTungliCodeHighlighter;
     PROCEDURE FormCreate(Sender: TObject);
     PROCEDURE ComboBox1Change(Sender: TObject);
-    PROCEDURE CodeEditor1KeyDown(Sender: TObject; VAR Key: Word;
-      Shift: TShiftState);
     PROCEDURE CheckBox1Click(Sender: TObject);
+    PROCEDURE ButtonTemplatesClick(Sender: TObject);
     PROCEDURE KeywordCompletionProvider1GetCompletions(Sender: TObject;
       CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
     PROCEDURE KeywordCompletionProvider1GetSignatureHelp(Sender: TObject;
@@ -315,8 +316,10 @@ TYPE
   PRIVATE
     { Private declarations }
     FCompletionProvider: TCustomCodeCompletionProvider;
+    FTemplateProvider: TCodeTemplateProvider;
     PROCEDURE GetCompletions(Sender: TObject; CONST Context: TCodeCompletionContext;
       Items: TCodeCompletionItems);
+    PROCEDURE AddSampleTemplates;
   PUBLIC
     { Public declarations }
   END;
@@ -334,19 +337,10 @@ BEGIN
   CodeEditor1.Enabled := CheckBox1.Checked;
 END;
 
-PROCEDURE TForm2.CodeEditor1KeyDown(Sender: TObject; VAR Key: Word;
-  Shift: TShiftState);
+PROCEDURE TForm2.ButtonTemplatesClick(Sender: TObject);
 BEGIN
-  IF (Shift = [ssCtrl]) AND (Key = Ord('J')) THEN BEGIN
-    CodeEditor1.AddNextSelectionOccurrence;
-    Key := 0;
-  END ELSE IF (Shift = [ssCtrl, ssShift]) AND (Key = Ord('L')) THEN BEGIN
-    CodeEditor1.SelectAllSelectionOccurrences;
-    Key := 0;
-  END ELSE IF Key = VK_ESCAPE THEN BEGIN
-    CodeEditor1.ClearMultipleSelections;
-    Key := 0;
-  END;
+  IF TCodeTemplateEditorDialog.Execute(FTemplateProvider) THEN
+    CodeEditor1.SetFocus;
 END;
 
 PROCEDURE TForm2.ComboBox1Change(Sender: TObject);
@@ -396,6 +390,113 @@ BEGIN
   END;
 END;
 
+PROCEDURE TForm2.AddSampleTemplates;
+BEGIN
+  WITH FTemplateProvider.Templates DO BEGIN
+    // Delphi
+    AddTemplate('begin', 'begin..end block', 'Delphi',
+      'begin' + sLineBreak +
+      '  |' + sLineBreak +
+      'end;');
+    AddTemplate('ifb', 'if..then begin..end', 'Delphi',
+      'if | then' + sLineBreak +
+      'begin' + sLineBreak +
+      'end;');
+    AddTemplate('ife', 'if..then..else', 'Delphi',
+      'if | then' + sLineBreak +
+      'begin' + sLineBreak +
+      'end' + sLineBreak +
+      'else' + sLineBreak +
+      'begin' + sLineBreak +
+      'end;');
+    AddTemplate('forb', 'for loop with begin..end', 'Delphi',
+      'for I := 0 to | do' + sLineBreak +
+      'begin' + sLineBreak +
+      'end;');
+    AddTemplate('tryf', 'try..finally', 'Delphi',
+      'try' + sLineBreak +
+      '  |' + sLineBreak +
+      'finally' + sLineBreak +
+      'end;');
+    AddTemplate('trye', 'try..except', 'Delphi',
+      'try' + sLineBreak +
+      '  |' + sLineBreak +
+      'except' + sLineBreak +
+      '  on E: Exception do' + sLineBreak +
+      'end;');
+    AddTemplate('proc', 'procedure skeleton', 'Delphi',
+      'procedure |;' + sLineBreak +
+      'begin' + sLineBreak +
+      'end;');
+    AddTemplate('func', 'function skeleton', 'Delphi',
+      'function |: Integer;' + sLineBreak +
+      'begin' + sLineBreak +
+      'end;');
+    AddTemplate('classd', 'class declaration', 'Delphi',
+      'type' + sLineBreak +
+      '  T| = class' + sLineBreak +
+      '  private' + sLineBreak +
+      '  public' + sLineBreak +
+      '  end;');
+
+    // JavaScript
+    AddTemplate('fun', 'function', 'JavaScript',
+      'function |() {' + sLineBreak +
+      '}');
+    AddTemplate('afun', 'async function', 'JavaScript',
+      'async function |() {' + sLineBreak +
+      '}');
+    AddTemplate('for', 'for loop', 'JavaScript',
+      'for (let i = 0; i < |; i++) {' + sLineBreak +
+      '}');
+    AddTemplate('tryc', 'try..catch', 'JavaScript',
+      'try {' + sLineBreak +
+      '  |' + sLineBreak +
+      '} catch (error) {' + sLineBreak +
+      '  console.error(error);' + sLineBreak +
+      '}');
+
+    // SQL
+    AddTemplate('sel', 'select skeleton', 'SQL',
+      'select |' + sLineBreak +
+      'from ' + sLineBreak +
+      'where ');
+    AddTemplate('selj', 'select with join', 'SQL',
+      'select |' + sLineBreak +
+      'from t1' + sLineBreak +
+      'join t2 on t2.Id = t1.Id' + sLineBreak +
+      'where ');
+    AddTemplate('upd', 'update statement', 'SQL',
+      'update |' + sLineBreak +
+      'set ' + sLineBreak +
+      'where ');
+    AddTemplate('ins', 'insert statement', 'SQL',
+      'insert into | ()' + sLineBreak +
+      'values ();');
+
+    // Python
+    AddTemplate('def', 'function definition', 'Python',
+      'def |():' + sLineBreak +
+      '    pass');
+    AddTemplate('classd', 'class definition', 'Python',
+      'class |:' + sLineBreak +
+      '    def __init__(self):' + sLineBreak +
+      '        pass');
+    AddTemplate('main', 'main guard', 'Python',
+      'if __name__ == "__main__":' + sLineBreak +
+      '    |');
+
+    // PowerShell
+    AddTemplate('func', 'function skeleton', 'PowerShell',
+      'function | {' + sLineBreak +
+      '    param()' + sLineBreak +
+      '}');
+    AddTemplate('fore', 'foreach loop', 'PowerShell',
+      'foreach ($item in $|) {' + sLineBreak +
+      '}');
+  END;
+END;
+
 PROCEDURE TForm2.FormCreate(Sender: TObject);
 BEGIN
 
@@ -404,9 +505,13 @@ BEGIN
   FCompletionProvider := TCustomCodeCompletionProvider.Create(Self);
   FCompletionProvider.OnGetCompletions := GetCompletions;
 
+  FTemplateProvider := TCodeTemplateProvider.Create(Self);
+  AddSampleTemplates;
+
   CodeEditor1.Highlighter := DelphiCodeHighlighter1;
   CodeEditor1.Lines.Text := cDelphi;
   CodeEditor1.CompletionProvider := FCompletionProvider;
+  CodeEditor1.TemplateProvider := FTemplateProvider;
   CodeEditor1.StyledScrollBars := True;
   CodeEditor1.Options.ShowMinimap := True;
   CodeEditor1.AddLineMarker(10, lmkError);

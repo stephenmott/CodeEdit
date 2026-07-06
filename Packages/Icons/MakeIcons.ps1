@@ -4,6 +4,7 @@ Add-Type -AssemblyName System.Drawing
 $icons = @(
     @{ Name = 'TCodeEditor';                Bg = '#2D2D30'; Fg = '#9CDCFE'; Glyph = 'Aa' },
     @{ Name = 'TKeywordCompletionProvider'; Bg = '#0E639C'; Fg = '#FFFFFF'; Glyph = '<>' },
+    @{ Name = 'TCodeTemplateProvider';      Bg = '#6A1B9A'; Fg = '#FFFFFF'; Glyph = 'TPL' },
     @{ Name = 'TDelphiCodeHighlighter';     Bg = '#A0252A'; Fg = '#FFFFFF'; Glyph = 'DP' },
     @{ Name = 'TJavaScriptCodeHighlighter'; Bg = '#F7DF1E'; Fg = '#000000'; Glyph = 'JS' },
     @{ Name = 'TSqlCodeHighlighter';        Bg = '#336791'; Fg = '#FFFFFF'; Glyph = 'SQL' },

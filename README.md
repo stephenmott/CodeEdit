@@ -15,6 +15,9 @@ attribution is appreciated.
   multi-line constructs (block comments, template literals, triple-quoted
   strings)
 - Code completion and signature help driven by a provider component
+- Code templates on Ctrl+J — per-language snippet expansion with caret
+  placeholder, plus a built-in editor dialog so end users can maintain their
+  own templates (JSON load/save)
 - Find/replace panel with match-case, whole-word, and regex modes; results
   stay in sync while editing
 - Multi-caret editing (Ctrl+D / Ctrl+Shift+L), word navigation,
@@ -33,6 +36,8 @@ attribution is appreciated.
   writing your own highlighter, the multi-line state contract
 - [Completion and signature help](docs/completion.md) — provider API and
   context records
+- [Code templates](docs/templates.md) — Ctrl+J templates, the provider
+  component, placeholder syntax, and the template editor dialog
 - [Breakpoints and line markers](docs/breakpoints-markers.md) — the
   debugger-host surface
 
@@ -44,6 +49,10 @@ attribution is appreciated.
 - `Source\CodeEdit.Highlighter.pas` — token model and highlighters for
   Delphi, JavaScript, SQL, Tungli, Batch (BAT/CMD), PowerShell, INI, YAML,
   and Python
+- `Source\CodeEdit.Templates.pas` — code template model and
+  `TCodeTemplateProvider`
+- `Source\CodeEdit.TemplateEditorDlg.pas` — runtime/design-time template
+  editor dialog
 - `Source\CodeEdit.Register.pas` — registers everything on the `CodeEdit`
   palette page
 - `Packages\CodeEditVcl.dpk` — design-time package
