@@ -1266,17 +1266,8 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditor.WMKillFocus(VAR Message: TWMKillFocus);
-VAR
-  LBuf              : ARRAY[0..127] OF Char;
 BEGIN
   HideCaret(Handle);
-  IF CompletionVisible THEN
-     {// b266 DIAG: what is stealing focus + closing the completion popup?} BEGIN
-    GetClassName(Message.FocusedWnd, LBuf, Length(LBuf));
-    OutputDebugString(PChar(Format('CE.WMKillFocus (completion visible): self=%d FocusedWnd=%d class="%s" inPopups=%s',
-      [Handle, Message.FocusedWnd, STRING(LBuf), BoolToStr(WindowInPopups(Message.FocusedWnd),
-        True)])));
-  END;
   // Don't hide the popups when focus merely bounces back to the editor itself (which happens
   // during the popup Show + SetFocus sequence) or moves onto one of the popup windows.
   IF (Message.FocusedWnd <> Handle) AND (NOT WindowInPopups(Message.FocusedWnd)) THEN BEGIN
@@ -2483,30 +2474,12 @@ BEGIN
   END;
 END;
 
-TYPE
-  // A ribbon/skinned host form (e.g. TdxRibbonForm) deactivates when an ACTIVATING popup is
-  // shown, and its focus handling then moves focus off the editor -> the editor gets
-  // WM_KILLFOCUS and HideCompletion fires immediately (the popup only "flashes"). WS_EX_NOACTIVATE
-  // must be applied at window creation (setting it after the handle exists has no effect), so the
-  // popup never takes activation and the host form + editor focus are left undisturbed. Harmless
-  // on plain forms — a completion/list popup should never activate anyway.
-  TCodePopupForm = CLASS(TForm)
-  PROTECTED
-    PROCEDURE CreateParams(VAR Params: TCreateParams); OVERRIDE;
-  END;
-
-PROCEDURE TCodePopupForm.CreateParams(VAR Params: TCreateParams);
-BEGIN
-  INHERITED;
-  Params.ExStyle := Params.ExStyle OR WS_EX_NOACTIVATE;
-END;
-
 PROCEDURE TCodeEditor.CreateCompletionPopup;
 BEGIN
   IF Assigned(FCompletionForm) THEN
     Exit;
 
-  FCompletionForm := TCodePopupForm.CreateNew(NIL);
+  FCompletionForm := TForm.CreateNew(NIL);
   FCompletionForm.BorderStyle := bsNone;
   FCompletionForm.BorderIcons := [];
   // pmExplicit keeps the popup above its owning form only, instead of the
@@ -2596,8 +2569,6 @@ END;
 
 PROCEDURE TCodeEditor.HideCompletion;
 BEGIN
-  IF Assigned(FCompletionForm) AND FCompletionForm.Visible THEN // b266 DIAG
-    OutputDebugString('CE.HideCompletion (popup WAS visible)');
   IF Assigned(FCompletionForm) THEN
     FCompletionForm.Hide;
 END;
