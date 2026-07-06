@@ -6,6 +6,12 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- `OnQueryExecutableLine` event: a pull-based per-line gutter hook (1-based
+  `Line`, `var Value: Boolean`) the editor calls while painting each visible
+  line, drawing a blue "executable line" dot when the handler returns True —
+  the equivalent of the Delphi IDE's blue dots, and of eControl's
+  `TSyntaxMemo` `OnCheckLine` gutter callbacks. Cheap regardless of file
+  size; call `Invalidate` when the executable set changes.
 - User template layer: `TCodeTemplateProvider.UserTemplates` +
   `UserFileName` with `LoadUserTemplates` / `SaveUserTemplates`, merged into
   the Ctrl+J popup on top of the built-in `Templates` — a user template with

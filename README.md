@@ -22,8 +22,8 @@ attribution is appreciated.
   stay in sync while editing
 - Multi-caret editing (Ctrl+D / Ctrl+Shift+L), word navigation,
   indent/unindent, line commenting
-- Breakpoints, execution-line arrow, and error/warning line markers for
-  debugger hosts — design-time editable, 1-based, edit-tracked
+- Breakpoints, execution-line arrow, executable-line dots, and error/warning
+  line markers for debugger hosts — design-time editable, 1-based, edit-tracked
 - Undo/redo with typing coalescing that also restores breakpoints,
   execution line, and the `Modified` flag
 - Minimap, styled scrollbars, bracket matching, occurrence highlighting

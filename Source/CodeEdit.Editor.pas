@@ -142,6 +142,11 @@ TYPE
   TCodeEditorCaretChangeEvent = PROCEDURE(Sender: TObject; CONST Caret: TCodePosition) OF OBJECT;
   TCodeEditorSelectionChangeEvent = PROCEDURE(Sender: TObject; CONST SelectionStart,
     SelectionEnd: TCodePosition) OF OBJECT;
+  // Pull-based per-line gutter query, called while painting each visible line.
+  // Line is 1-based (matching the gutter). Used for the executable-line dots
+  // ("blue dots") a script debugger shows next to lines that generate code.
+  TCodeEditorQueryLineEvent = PROCEDURE(Sender: TObject; Line: Integer;
+    VAR Value: Boolean) OF OBJECT;
 
   TCodeEditor = CLASS;
 
@@ -314,6 +319,7 @@ TYPE
     FOnBreakpointsChanged: TNotifyEvent;
     FOnSelectionChange: TCodeEditorSelectionChangeEvent;
     FOnZoomChanged: TNotifyEvent;
+    FOnQueryExecutableLine: TCodeEditorQueryLineEvent;
     PROCEDURE LinesChanged(Sender: TObject);
     PROCEDURE OptionsChanged(Sender: TObject);
     PROCEDURE ThemeChanged(Sender: TObject);
@@ -480,6 +486,8 @@ TYPE
     PROCEDURE ShiftBreakpoints(AfterLine, Delta: Integer);
     PROCEDURE ShiftLineMarkers(AfterLine, Delta: Integer);
     PROCEDURE PaintBreakpointGlyph(CONST CellRect: TRect; HasBp, IsExec: Boolean);
+    PROCEDURE PaintExecutableDot(CONST CellRect: TRect);
+    FUNCTION QueryExecutableLine(Line: Integer): Boolean;
     PROCEDURE PaintLineMarkerGlyph(CONST CellRect: TRect; Marker: TCodeLineMarker);
     FUNCTION FirstLineMarkerAny(Line: Integer): TCodeLineMarker;
     FUNCTION MarkerBackgroundColor(Marker: TCodeLineMarker; CONST ThemeColors:
@@ -610,6 +618,12 @@ TYPE
     PROPERTY OnSelectionChange: TCodeEditorSelectionChangeEvent READ FOnSelectionChange WRITE
       FOnSelectionChange;
     PROPERTY OnZoomChanged: TNotifyEvent READ FOnZoomChanged WRITE FOnZoomChanged;
+    // Return True in Value to show an executable-line dot in the gutter for
+    // the given 1-based Line. Called per visible line while painting, so keep
+    // it cheap; call Invalidate after the executable set changes (e.g. after
+    // the script recompiles) to force a repaint.
+    PROPERTY OnQueryExecutableLine: TCodeEditorQueryLineEvent READ FOnQueryExecutableLine
+      WRITE FOnQueryExecutableLine;
   END;
 
 IMPLEMENTATION
@@ -5143,6 +5157,30 @@ BEGIN
   END;
 END;
 
+PROCEDURE TCodeEditor.PaintExecutableDot(CONST CellRect: TRect);
+VAR
+  Size              : Integer;
+  Cx, Cy            : Integer;
+  Dot               : TRect;
+BEGIN
+  // A small blue dot, like the Delphi IDE's "this line generates code" marker;
+  // deliberately smaller than the breakpoint circle it shares the margin with.
+  Size := Max(4, (Min(CellRect.Width, FLineHeight) - 4) DIV 2);
+  Cx := (CellRect.Left + CellRect.Right) DIV 2;
+  Cy := (CellRect.Top + CellRect.Bottom) DIV 2;
+  Dot := Rect(Cx - Size DIV 2, Cy - Size DIV 2, Cx - Size DIV 2 + Size, Cy - Size DIV 2 + Size);
+  Canvas.Brush.Color := $00E04830;
+  Canvas.Pen.Color := $00A02818;
+  Canvas.Ellipse(Dot);
+END;
+
+FUNCTION TCodeEditor.QueryExecutableLine(Line: Integer): Boolean;
+BEGIN
+  Result := False;
+  IF Assigned(FOnQueryExecutableLine) THEN
+    FOnQueryExecutableLine(Self, Line, Result);
+END;
+
 FUNCTION TCodeEditor.FirstLineMarkerAny(Line: Integer): TCodeLineMarker;
 VAR
   I                 : Integer;
@@ -5298,6 +5336,12 @@ BEGIN
       IF HasBp OR IsExec THEN BEGIN
         Cell := Rect(0, Y - 1, BreakpointMarginWidth, Y - 1 + FLineHeight);
         PaintBreakpointGlyph(Cell, HasBp, IsExec);
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := ThemeColors.GutterBackground;
+      END ELSE IF QueryExecutableLine(LineIndex + 1) THEN BEGIN
+        // Executable-line dot, in the same margin a breakpoint/arrow would use.
+        Cell := Rect(0, Y - 1, BreakpointMarginWidth, Y - 1 + FLineHeight);
+        PaintExecutableDot(Cell);
         Canvas.Brush.Style := bsSolid;
         Canvas.Brush.Color := ThemeColors.GutterBackground;
       END;

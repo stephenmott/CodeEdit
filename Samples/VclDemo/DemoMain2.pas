@@ -313,6 +313,8 @@ TYPE
       CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
     PROCEDURE KeywordCompletionProvider1GetSignatureHelp(Sender: TObject;
       CONST Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems);
+    PROCEDURE CodeEditor1QueryExecutableLine(Sender: TObject; Line: Integer;
+      VAR Value: Boolean);
   PRIVATE
     { Private declarations }
     FCompletionProvider: TCustomCodeCompletionProvider;
@@ -523,7 +525,23 @@ BEGIN
   CodeEditor1.AddLineMarker(12, lmkWarning);
   CodeEditor1.AddLineMarker(13, lmkInfo);
 
+  // Blue "executable line" dots: a debugger would ask its script engine here;
+  // the demo just marks non-blank, non-comment lines.
+  CodeEditor1.OnQueryExecutableLine := CodeEditor1QueryExecutableLine;
+
   ComboBox1.ItemIndex := 0;
+END;
+
+PROCEDURE TForm2.CodeEditor1QueryExecutableLine(Sender: TObject; Line: Integer;
+  VAR Value: Boolean);
+VAR
+  S                 : STRING;
+BEGIN
+  Value := False;
+  IF (Line >= 1) AND (Line <= CodeEditor1.Lines.Count) THEN BEGIN
+    S := Trim(CodeEditor1.Lines[Line - 1]);
+    Value := (S <> '') AND (Copy(S, 1, 2) <> '//');
+  END;
 END;
 
 PROCEDURE TForm2.GetCompletions(Sender: TObject;

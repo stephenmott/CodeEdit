@@ -52,10 +52,38 @@ into view. The arrow is amber for a plain current statement, and cyan over
 the red dot when execution stops on a line that also has a breakpoint
 (Delphi-style).
 
+## Executable-line dots
+
+A script debugger typically shows a small dot next to every line that
+generates code (the Delphi IDE's "blue dots") — the lines a breakpoint can
+land on. Because that is a *per-line predicate* over potentially hundreds of
+lines, it is driven by a pull event rather than a marker collection:
+
+```pascal
+CodeEditor1.OnQueryExecutableLine := EditorQueryExecutableLine;
+
+procedure TForm1.EditorQueryExecutableLine(Sender: TObject; Line: Integer;
+  var Value: Boolean);
+begin
+  Value := Interpreter.IsExecutableLine(Line);   // Line is 1-based
+end;
+```
+
+The editor calls the handler for each visible line while painting the gutter
+and draws a blue dot (in the same margin as breakpoints/the execution arrow)
+when `Value` comes back True. Because it is evaluated lazily per visible line,
+it stays cheap no matter how large the file is — keep the handler itself
+quick. When the executable set changes (e.g. the script recompiles), call
+`CodeEditor1.Invalidate` to force a repaint.
+
+This replaces the pull-based per-line gutter callbacks (`OnCheckLine`) that
+eControl's `TSyntaxMemo` used. For a *single* highlighted statement, prefer
+`ExecutionLine` or an `lmkExecutable` line marker below.
+
 ## Line markers
 
-For compiler/debugger annotations beyond breakpoints — executable-line dots,
-errors, warnings:
+For compiler/debugger annotations beyond breakpoints — errors, warnings, a
+one-off highlighted statement:
 
 ```pascal
 CodeEditor1.AddLineMarker(12, lmkExecutable);
