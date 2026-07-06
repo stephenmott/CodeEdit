@@ -69,16 +69,25 @@ with no highlighter shows all templates.
 ```pascal
 uses CodeEdit.TemplateEditorDlg;
 
-if TCodeTemplateEditorDialog.Execute(TemplateProvider1) then
-  TemplateProvider1.SaveToFile(TemplatesFileName);
+// Edit the end-user layer — this is what apps normally want (see below).
+TCodeTemplateEditorDialog.Execute(TemplateProvider1);
 ```
 
 The dialog lists templates with a per-language filter, supports Add /
 Duplicate / Delete, and edits the template body in a `TCodeEditor` with the
-matching highlighter. It works on a copy — the provider is only modified when
-the user clicks OK (`Execute` returns True).
+matching highlighter. It works on a copy — nothing is written back unless the
+user clicks OK (`Execute` returns True).
 
-At design time the same dialog is registered as the component editor for
+It has two overloads:
+
+- `Execute(AProvider: TCodeTemplateProvider)` — edits the provider's **user
+  layer** and auto-saves it (covered in the next section). This is what the
+  design-time component editor uses too.
+- `Execute(ATemplates: TCodeTemplates)` — edits a single collection in-place,
+  for apps that manage one flat set themselves. The caller decides when to
+  persist it (e.g. `TemplateProvider1.SaveToFile(...)`).
+
+At design time the dialog is registered as the component editor for
 `TCodeTemplateProvider`: double-click the component (or choose
 "Edit Templates...") and the changes stream into the DFM.
 

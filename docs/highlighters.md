@@ -63,6 +63,13 @@ the same value as `StartState`. The values are opaque to the editor — it
 only stores and compares them. The editor maintains the chain lazily and
 re-tokenizes only lines whose text or incoming state changed.
 
+**Language name**: a `class function LanguageName: string` returns a
+human-readable identifier for the language (`'Delphi'`, `'SQL'`, …), used to
+group per-language data such as [code templates](templates.md). The default
+derives it from the class name — `TFooCodeHighlighter` → `'Foo'` — so custom
+highlighters get a sensible value for free; override it when the casing can't
+be derived (the bundled `SQL`, `INI`, and `YAML` highlighters do).
+
 ### TCustomWordCodeHighlighter
 
 The workhorse base class — a generic word/keyword lexer driven by small
