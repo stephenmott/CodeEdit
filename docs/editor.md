@@ -189,6 +189,30 @@ Selected text is painted with `SelectionText` over `SelectionBackground`.
 Whether the theme counts as *dark* (for syntax-color remapping, minimap and
 scrollbar shading) is decided from the background's luminance.
 
+### DevExpress skins
+
+For apps using the DevExpress skin library there is a ready-made bridge in
+`Source\CodeEdit.DevExpressTheme.pas`. It is intentionally **not** in the
+CodeEditVcl package (the core stays free of third-party dependencies) — add
+the unit to the application instead:
+
+```pascal
+uses CodeEdit.DevExpressTheme;
+
+// one-shot: map the active skin onto the editor
+ApplyDevExpressThemeToEditor(CodeEditor1);
+
+// or self-updating: follows runtime skin changes automatically
+FSkinTheme := TCodeEditorDevExpressTheme.Create(Self);
+FSkinTheme.AttachEditor(CodeEditor1);
+```
+
+The mapping pulls the editor background/text, gutter (header colors), grid
+line, and selection colors from the active `RootLookAndFeel` painter and
+switches the editor to `ctmManual`. Dark skins are handled by the editor's
+luminance-based dark detection, which remaps syntax token colors
+automatically.
+
 ## Limits worth knowing
 
 - Line storage is an in-memory `TStringList`; undo snapshots the whole

@@ -1,8 +1,8 @@
-unit CodeEdit.TemplateEditorDlg;
+UNIT CodeEdit.TemplateEditorDlg;
 
-interface
+INTERFACE
 
-uses
+USES
   System.Classes,
   Vcl.Controls,
   Vcl.ExtCtrls,
@@ -12,13 +12,13 @@ uses
   CodeEdit.Highlighter,
   CodeEdit.Templates;
 
-type
+TYPE
   // Dialog for creating and editing code templates. A regular designed form
   // (open the DFM in the IDE to restyle it), usable at runtime for end users
   // maintaining their own templates and at design time as the
   // TCodeTemplateProvider component editor. It edits a working copy; the
   // source collection is only updated when the user confirms with OK.
-  TCodeTemplateEditorDialog = class(TForm)
+  TCodeTemplateEditorDialog = CLASS(TForm)
     PanelLeft: TPanel;
     FilterCombo: TComboBox;
     ListTemplates: TListBox;
@@ -41,47 +41,53 @@ type
     LabelHint: TLabel;
     ButtonOK: TButton;
     ButtonCancel: TButton;
-    procedure FormCreate(Sender: TObject);
-    procedure FormDestroy(Sender: TObject);
-    procedure FilterComboChange(Sender: TObject);
-    procedure ListTemplatesClick(Sender: TObject);
-    procedure EditNameChange(Sender: TObject);
-    procedure EditDescriptionChange(Sender: TObject);
-    procedure ComboLanguageChange(Sender: TObject);
-    procedure CodeEditorChange(Sender: TObject);
-    procedure ButtonAddClick(Sender: TObject);
-    procedure ButtonDuplicateClick(Sender: TObject);
-    procedure ButtonDeleteClick(Sender: TObject);
-  private
+    PROCEDURE FormCreate(Sender: TObject);
+    PROCEDURE FormDestroy(Sender: TObject);
+    PROCEDURE FilterComboChange(Sender: TObject);
+    PROCEDURE ListTemplatesClick(Sender: TObject);
+    PROCEDURE EditNameChange(Sender: TObject);
+    PROCEDURE EditDescriptionChange(Sender: TObject);
+    PROCEDURE ComboLanguageChange(Sender: TObject);
+    PROCEDURE CodeEditorChange(Sender: TObject);
+    PROCEDURE ButtonAddClick(Sender: TObject);
+    PROCEDURE ButtonDuplicateClick(Sender: TObject);
+    PROCEDURE ButtonDeleteClick(Sender: TObject);
+  PRIVATE
     FTemplates: TCodeTemplates;
+    FBuiltIn: TCodeTemplates;
     FHighlighters: TStringList;
     FLoading: Boolean;
-    procedure RefreshLanguageLists;
-    procedure RefreshList(SelectTemplate: TCodeTemplate);
-    function SelectedTemplate: TCodeTemplate;
-    function FilterLanguage: string;
-    function ListCaption(Template: TCodeTemplate): string;
-    procedure UpdateHighlighter;
-    procedure LoadSelection;
-    procedure UpdateControlStates;
-  public
+    PROCEDURE RefreshLanguageLists;
+    PROCEDURE RefreshList(SelectTemplate: TCodeTemplate);
+    FUNCTION SelectedTemplate: TCodeTemplate;
+    FUNCTION IsBuiltIn(Template: TCodeTemplate): Boolean;
+    FUNCTION FilterLanguage: STRING;
+    FUNCTION ListCaption(Template: TCodeTemplate): STRING;
+    PROCEDURE UpdateHighlighter;
+    PROCEDURE LoadSelection;
+    PROCEDURE UpdateControlStates;
+  PUBLIC
     // Shows the dialog for ATemplates; returns True (and applies the changes)
     // when the user confirms with OK.
-    class function Execute(ATemplates: TCodeTemplates): Boolean; overload;
-    class function Execute(AProvider: TCodeTemplateProvider): Boolean; overload;
-  end;
+    CLASS FUNCTION Execute(ATemplates: TCodeTemplates): Boolean; OVERLOAD;
+    // Edits the provider's user template layer. The built-in Templates are
+    // shown read-only for reference; Duplicate turns one into an editable
+    // user template (same name = overrides the built-in). On OK the user
+    // layer is written back and, when UserFileName is set, saved to disk.
+    CLASS FUNCTION Execute(AProvider: TCodeTemplateProvider): Boolean; OVERLOAD;
+  END;
 
-implementation
+IMPLEMENTATION
 
-uses
+USES
   System.SysUtils;
 
 {$R *.dfm}
 
-const
+CONST
   // Highlighters offered in the language picker and used for preview
   // highlighting inside the dialog.
-  KnownHighlighters: array[0..8] of TCodeHighlighterClass = (
+  KnownHighlighters : ARRAY[0..8] OF TCodeHighlighterClass = (
     TDelphiCodeHighlighter,
     TJavaScriptCodeHighlighter,
     TSqlCodeHighlighter,
@@ -91,316 +97,348 @@ const
     TIniCodeHighlighter,
     TYamlCodeHighlighter,
     TPythonCodeHighlighter
-  );
+    );
 
   AllLanguagesCaption = '(all languages)';
   AnyLanguageCaption = '(any)';
 
-{ TCodeTemplateEditorDialog }
+  { TCodeTemplateEditorDialog }
 
-procedure TCodeTemplateEditorDialog.FormCreate(Sender: TObject);
-begin
+PROCEDURE TCodeTemplateEditorDialog.FormCreate(Sender: TObject);
+BEGIN
   FTemplates := TCodeTemplates.Create(Self);
+  FBuiltIn := TCodeTemplates.Create(Self);
   FHighlighters := TStringList.Create;
   FHighlighters.CaseSensitive := False;
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.FormDestroy(Sender: TObject);
-begin
+PROCEDURE TCodeTemplateEditorDialog.FormDestroy(Sender: TObject);
+BEGIN
   FHighlighters.Free;
-end;
+END;
 
-class function TCodeTemplateEditorDialog.Execute(ATemplates: TCodeTemplates): Boolean;
-var
-  Dialog: TCodeTemplateEditorDialog;
-begin
+CLASS FUNCTION TCodeTemplateEditorDialog.Execute(ATemplates: TCodeTemplates): Boolean;
+VAR
+  Dialog            : TCodeTemplateEditorDialog;
+BEGIN
   Dialog := TCodeTemplateEditorDialog.Create(Application);
-  try
+  TRY
     Dialog.FTemplates.Assign(ATemplates);
     Dialog.RefreshLanguageLists;
-    Dialog.RefreshList(nil);
+    Dialog.RefreshList(NIL);
     Result := Dialog.ShowModal = mrOk;
-    if Result then
+    IF Result THEN
       ATemplates.Assign(Dialog.FTemplates);
-  finally
+  FINALLY
     Dialog.Free;
-  end;
-end;
+  END;
+END;
 
-class function TCodeTemplateEditorDialog.Execute(AProvider: TCodeTemplateProvider): Boolean;
-begin
-  Result := Execute(AProvider.Templates);
-end;
+CLASS FUNCTION TCodeTemplateEditorDialog.Execute(AProvider: TCodeTemplateProvider): Boolean;
+VAR
+  Dialog            : TCodeTemplateEditorDialog;
+BEGIN
+  Dialog := TCodeTemplateEditorDialog.Create(Application);
+  TRY
+    Dialog.FBuiltIn.Assign(AProvider.Templates);
+    Dialog.FTemplates.Assign(AProvider.UserTemplates);
+    Dialog.RefreshLanguageLists;
+    Dialog.RefreshList(NIL);
+    Result := Dialog.ShowModal = mrOk;
+    IF Result THEN BEGIN
+      AProvider.UserTemplates.Assign(Dialog.FTemplates);
+      IF AProvider.UserFileName <> '' THEN
+        AProvider.SaveUserTemplates;
+    END;
+  FINALLY
+    Dialog.Free;
+  END;
+END;
 
-procedure TCodeTemplateEditorDialog.RefreshLanguageLists;
-var
-  Languages: TStringList;
-  HighlighterClass: TCodeHighlighterClass;
-  Filter: string;
-  I: Integer;
-begin
+PROCEDURE TCodeTemplateEditorDialog.RefreshLanguageLists;
+VAR
+  Languages         : TStringList;
+  HighlighterClass  : TCodeHighlighterClass;
+  Filter            : STRING;
+  I                 : Integer;
+BEGIN
   Languages := TStringList.Create;
-  try
+  TRY
     Languages.CaseSensitive := False;
     Languages.Sorted := True;
     Languages.Duplicates := dupIgnore;
-    for HighlighterClass in KnownHighlighters do
+    FOR HighlighterClass IN KnownHighlighters DO
       Languages.Add(HighlighterClass.LanguageName);
-    for I := 0 to FTemplates.Count - 1 do
-      if FTemplates[I].Language <> '' then
+    FOR I := 0 TO FTemplates.Count - 1 DO
+      IF FTemplates[I].Language <> '' THEN
         Languages.Add(FTemplates[I].Language);
+    FOR I := 0 TO FBuiltIn.Count - 1 DO
+      IF FBuiltIn[I].Language <> '' THEN
+        Languages.Add(FBuiltIn[I].Language);
 
     Filter := FilterCombo.Text;
     FilterCombo.Items.BeginUpdate;
-    try
+    TRY
       FilterCombo.Items.Clear;
       FilterCombo.Items.Add(AllLanguagesCaption);
       FilterCombo.Items.AddStrings(Languages);
       I := FilterCombo.Items.IndexOf(Filter);
-      if I < 0 then
+      IF I < 0 THEN
         I := 0;
       FilterCombo.ItemIndex := I;
-    finally
+    FINALLY
       FilterCombo.Items.EndUpdate;
-    end;
+    END;
 
     ComboLanguage.Items.BeginUpdate;
-    try
+    TRY
       ComboLanguage.Items.Clear;
       ComboLanguage.Items.Add(AnyLanguageCaption);
       ComboLanguage.Items.AddStrings(Languages);
-    finally
+    FINALLY
       ComboLanguage.Items.EndUpdate;
-    end;
-  finally
+    END;
+  FINALLY
     Languages.Free;
-  end;
-end;
+  END;
+END;
 
-function TCodeTemplateEditorDialog.FilterLanguage: string;
-begin
-  if FilterCombo.ItemIndex <= 0 then
+FUNCTION TCodeTemplateEditorDialog.FilterLanguage: STRING;
+BEGIN
+  IF FilterCombo.ItemIndex <= 0 THEN
     Result := ''
-  else
+  ELSE
     Result := FilterCombo.Items[FilterCombo.ItemIndex];
-end;
+END;
 
-function TCodeTemplateEditorDialog.ListCaption(Template: TCodeTemplate): string;
-begin
+FUNCTION TCodeTemplateEditorDialog.ListCaption(Template: TCodeTemplate): STRING;
+BEGIN
   Result := Template.Name;
-  if Result = '' then
+  IF Result = '' THEN
     Result := '(unnamed)';
-  if Template.Language <> '' then
+  IF Template.Language <> '' THEN
     Result := Result + '  [' + Template.Language + ']';
-  if Template.Description <> '' then
+  IF Template.Description <> '' THEN
     Result := Result + '  - ' + Template.Description;
-end;
+  IF IsBuiltIn(Template) THEN
+    Result := Result + '  (built-in)';
+END;
 
-procedure TCodeTemplateEditorDialog.RefreshList(SelectTemplate: TCodeTemplate);
-var
-  I: Integer;
-  Filter: string;
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.RefreshList(SelectTemplate: TCodeTemplate);
+VAR
+  I                 : Integer;
+  Filter            : STRING;
+  Template          : TCodeTemplate;
+BEGIN
   Filter := FilterLanguage;
   ListTemplates.Items.BeginUpdate;
-  try
+  TRY
     ListTemplates.Items.Clear;
-    for I := 0 to FTemplates.Count - 1 do
-    begin
+    FOR I := 0 TO FTemplates.Count - 1 DO BEGIN
       Template := FTemplates[I];
-      if (Filter = '') or SameText(Template.Language, Filter) then
+      IF (Filter = '') OR SameText(Template.Language, Filter) THEN
         ListTemplates.Items.AddObject(ListCaption(Template), Template);
-    end;
-  finally
+    END;
+    FOR I := 0 TO FBuiltIn.Count - 1 DO BEGIN
+      Template := FBuiltIn[I];
+      IF (Filter = '') OR SameText(Template.Language, Filter) THEN
+        ListTemplates.Items.AddObject(ListCaption(Template), Template);
+    END;
+  FINALLY
     ListTemplates.Items.EndUpdate;
-  end;
+  END;
 
-  if ListTemplates.Items.Count > 0 then
-  begin
+  IF ListTemplates.Items.Count > 0 THEN BEGIN
     ListTemplates.ItemIndex := 0;
-    if Assigned(SelectTemplate) then
-    begin
+    IF Assigned(SelectTemplate) THEN BEGIN
       I := ListTemplates.Items.IndexOfObject(SelectTemplate);
-      if I >= 0 then
+      IF I >= 0 THEN
         ListTemplates.ItemIndex := I;
-    end;
-  end;
+    END;
+  END;
   LoadSelection;
-end;
+END;
 
-function TCodeTemplateEditorDialog.SelectedTemplate: TCodeTemplate;
-begin
-  if ListTemplates.ItemIndex >= 0 then
+FUNCTION TCodeTemplateEditorDialog.SelectedTemplate: TCodeTemplate;
+BEGIN
+  IF ListTemplates.ItemIndex >= 0 THEN
     Result := TCodeTemplate(ListTemplates.Items.Objects[ListTemplates.ItemIndex])
-  else
-    Result := nil;
-end;
+  ELSE
+    Result := NIL;
+END;
 
-procedure TCodeTemplateEditorDialog.UpdateHighlighter;
-var
-  Template: TCodeTemplate;
-  HighlighterClass: TCodeHighlighterClass;
-  I: Integer;
-begin
+FUNCTION TCodeTemplateEditorDialog.IsBuiltIn(Template: TCodeTemplate): Boolean;
+BEGIN
+  Result := Assigned(Template) AND (Template.Collection = FBuiltIn);
+END;
+
+PROCEDURE TCodeTemplateEditorDialog.UpdateHighlighter;
+VAR
+  Template          : TCodeTemplate;
+  HighlighterClass  : TCodeHighlighterClass;
+  I                 : Integer;
+BEGIN
   Template := SelectedTemplate;
-  CodeEditor.Highlighter := nil;
-  if not Assigned(Template) or (Template.Language = '') then
+  CodeEditor.Highlighter := NIL;
+  IF NOT Assigned(Template) OR (Template.Language = '') THEN
     Exit;
 
   I := FHighlighters.IndexOf(Template.Language);
-  if I >= 0 then
-  begin
+  IF I >= 0 THEN BEGIN
     CodeEditor.Highlighter := TCustomCodeHighlighter(FHighlighters.Objects[I]);
     Exit;
-  end;
+  END;
 
-  for HighlighterClass in KnownHighlighters do
-    if SameText(HighlighterClass.LanguageName, Template.Language) then
-    begin
+  FOR HighlighterClass IN KnownHighlighters DO
+    IF SameText(HighlighterClass.LanguageName, Template.Language) THEN BEGIN
       CodeEditor.Highlighter := HighlighterClass.Create(Self);
       FHighlighters.AddObject(Template.Language, CodeEditor.Highlighter);
       Exit;
-    end;
-end;
+    END;
+END;
 
-procedure TCodeTemplateEditorDialog.LoadSelection;
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.LoadSelection;
+VAR
+  Template          : TCodeTemplate;
+BEGIN
   FLoading := True;
-  try
+  TRY
     Template := SelectedTemplate;
-    if Assigned(Template) then
-    begin
+    IF Assigned(Template) THEN BEGIN
       EditName.Text := Template.Name;
       EditDescription.Text := Template.Description;
-      if Template.Language = '' then
+      IF Template.Language = '' THEN
         ComboLanguage.Text := AnyLanguageCaption
-      else
+      ELSE
         ComboLanguage.Text := Template.Language;
       CodeEditor.Lines.Assign(Template.Code);
-    end
-    else
-    begin
+    END ELSE BEGIN
       EditName.Text := '';
       EditDescription.Text := '';
       ComboLanguage.Text := '';
       CodeEditor.Lines.Clear;
-    end;
+    END;
     UpdateHighlighter;
-  finally
+  FINALLY
     FLoading := False;
-  end;
+  END;
   UpdateControlStates;
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.UpdateControlStates;
-var
-  HasSelection: Boolean;
-begin
-  HasSelection := SelectedTemplate <> nil;
-  EditName.Enabled := HasSelection;
-  EditDescription.Enabled := HasSelection;
-  ComboLanguage.Enabled := HasSelection;
-  CodeEditor.Enabled := HasSelection;
-  CodeEditor.ReadOnly := not HasSelection;
-  ButtonDuplicate.Enabled := HasSelection;
-  ButtonDelete.Enabled := HasSelection;
-end;
-
-procedure TCodeTemplateEditorDialog.ListTemplatesClick(Sender: TObject);
-begin
-  LoadSelection;
-end;
-
-procedure TCodeTemplateEditorDialog.FilterComboChange(Sender: TObject);
-begin
-  RefreshList(SelectedTemplate);
-end;
-
-procedure TCodeTemplateEditorDialog.EditNameChange(Sender: TObject);
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.UpdateControlStates;
+VAR
+  Template          : TCodeTemplate;
+  Editable          : Boolean;
+BEGIN
   Template := SelectedTemplate;
-  if FLoading or not Assigned(Template) then
+  // Built-in templates are reference-only: read them, duplicate them into
+  // the user layer, but never edit or delete them here.
+  Editable := Assigned(Template) AND NOT IsBuiltIn(Template);
+  EditName.Enabled := Editable;
+  EditDescription.Enabled := Editable;
+  ComboLanguage.Enabled := Editable;
+  CodeEditor.Enabled := Assigned(Template);
+  CodeEditor.ReadOnly := NOT Editable;
+  ButtonDuplicate.Enabled := Assigned(Template);
+  ButtonDelete.Enabled := Editable;
+END;
+
+PROCEDURE TCodeTemplateEditorDialog.ListTemplatesClick(Sender: TObject);
+BEGIN
+  LoadSelection;
+END;
+
+PROCEDURE TCodeTemplateEditorDialog.FilterComboChange(Sender: TObject);
+BEGIN
+  RefreshList(SelectedTemplate);
+END;
+
+PROCEDURE TCodeTemplateEditorDialog.EditNameChange(Sender: TObject);
+VAR
+  Template          : TCodeTemplate;
+BEGIN
+  Template := SelectedTemplate;
+  IF FLoading OR NOT Assigned(Template) OR IsBuiltIn(Template) THEN
     Exit;
   Template.Name := EditName.Text;
   ListTemplates.Items[ListTemplates.ItemIndex] := ListCaption(Template);
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.EditDescriptionChange(Sender: TObject);
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.EditDescriptionChange(Sender: TObject);
+VAR
+  Template          : TCodeTemplate;
+BEGIN
   Template := SelectedTemplate;
-  if FLoading or not Assigned(Template) then
+  IF FLoading OR NOT Assigned(Template) OR IsBuiltIn(Template) THEN
     Exit;
   Template.Description := EditDescription.Text;
   ListTemplates.Items[ListTemplates.ItemIndex] := ListCaption(Template);
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.ComboLanguageChange(Sender: TObject);
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.ComboLanguageChange(Sender: TObject);
+VAR
+  Template          : TCodeTemplate;
+BEGIN
   Template := SelectedTemplate;
-  if FLoading or not Assigned(Template) then
+  IF FLoading OR NOT Assigned(Template) OR IsBuiltIn(Template) THEN
     Exit;
-  if (ComboLanguage.Text = AnyLanguageCaption) or (ComboLanguage.Text = '') then
+  IF (ComboLanguage.Text = AnyLanguageCaption) OR (ComboLanguage.Text = '') THEN
     Template.Language := ''
-  else
+  ELSE
     Template.Language := ComboLanguage.Text;
   ListTemplates.Items[ListTemplates.ItemIndex] := ListCaption(Template);
   UpdateHighlighter;
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.CodeEditorChange(Sender: TObject);
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.CodeEditorChange(Sender: TObject);
+VAR
+  Template          : TCodeTemplate;
+BEGIN
   Template := SelectedTemplate;
-  if FLoading or not Assigned(Template) then
+  IF FLoading OR NOT Assigned(Template) OR IsBuiltIn(Template) THEN
     Exit;
   Template.Code.Assign(CodeEditor.Lines);
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.ButtonAddClick(Sender: TObject);
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.ButtonAddClick(Sender: TObject);
+VAR
+  Template          : TCodeTemplate;
+BEGIN
   Template := FTemplates.Add;
   Template.Language := FilterLanguage;
   RefreshLanguageLists;
   RefreshList(Template);
   EditName.SetFocus;
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.ButtonDuplicateClick(Sender: TObject);
-var
-  Source: TCodeTemplate;
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.ButtonDuplicateClick(Sender: TObject);
+VAR
+  Source            : TCodeTemplate;
+  Template          : TCodeTemplate;
+BEGIN
   Source := SelectedTemplate;
-  if not Assigned(Source) then
+  IF NOT Assigned(Source) THEN
     Exit;
   Template := FTemplates.Add;
   Template.Assign(Source);
-  Template.Name := Source.Name + ' copy';
+  // Duplicating a built-in keeps its name: the user copy overrides it. A
+  // user-template duplicate needs a fresh name to avoid clashing.
+  IF NOT IsBuiltIn(Source) THEN
+    Template.Name := Source.Name + ' copy';
   RefreshList(Template);
   EditName.SetFocus;
-end;
+END;
 
-procedure TCodeTemplateEditorDialog.ButtonDeleteClick(Sender: TObject);
-var
-  Template: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplateEditorDialog.ButtonDeleteClick(Sender: TObject);
+VAR
+  Template          : TCodeTemplate;
+BEGIN
   Template := SelectedTemplate;
-  if not Assigned(Template) then
+  IF NOT Assigned(Template) OR IsBuiltIn(Template) THEN
     Exit;
   Template.Free;
-  RefreshList(nil);
-end;
+  RefreshList(NIL);
+END;
 
-end.
+END.
+

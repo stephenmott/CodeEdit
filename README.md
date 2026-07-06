@@ -16,8 +16,8 @@ attribution is appreciated.
   strings)
 - Code completion and signature help driven by a provider component
 - Code templates on Ctrl+J — per-language snippet expansion with caret
-  placeholder, plus a built-in editor dialog so end users can maintain their
-  own templates (JSON load/save)
+  placeholder; user templates layer on top of the app's built-in set
+  (JSON persisted, editable in a built-in dialog, overrides by name)
 - Find/replace panel with match-case, whole-word, and regex modes; results
   stay in sync while editing
 - Multi-caret editing (Ctrl+D / Ctrl+Shift+L), word navigation,
@@ -53,6 +53,8 @@ attribution is appreciated.
   `TCodeTemplateProvider`
 - `Source\CodeEdit.TemplateEditorDlg.pas` — runtime/design-time template
   editor dialog
+- `Source\CodeEdit.DevExpressTheme.pas` — optional DevExpress skin bridge
+  (add to apps directly; not part of the package)
 - `Source\CodeEdit.Register.pas` — registers everything on the `CodeEdit`
   palette page
 - `Packages\CodeEditVcl.dpk` — design-time package

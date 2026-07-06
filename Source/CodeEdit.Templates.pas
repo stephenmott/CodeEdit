@@ -1,396 +1,477 @@
-unit CodeEdit.Templates;
+UNIT CodeEdit.Templates;
 
-interface
+INTERFACE
 
-uses
+USES
   System.Classes,
   System.Generics.Collections;
 
-type
+TYPE
   // A reusable block of code inserted via Ctrl+J. The Name is what the user
   // types to select it; Language ('' = any) ties it to a highlighter's
   // LanguageName. In Code, '|' marks where the caret lands after insertion
   // and '||' produces a literal '|'.
-  TCodeTemplate = class(TCollectionItem)
-  private
-    FName: string;
-    FDescription: string;
-    FLanguage: string;
+  TCodeTemplate = CLASS(TCollectionItem)
+  PRIVATE
+    FName: STRING;
+    FDescription: STRING;
+    FLanguage: STRING;
     FCode: TStringList;
-    function GetCode: TStrings;
-    procedure SetCode(Value: TStrings);
-  protected
-    function GetDisplayName: string; override;
-  public
-    constructor Create(Collection: TCollection); override;
-    destructor Destroy; override;
-    procedure Assign(Source: TPersistent); override;
-    function MatchesLanguage(const ALanguage: string): Boolean;
-  published
-    property Name: string read FName write FName;
-    property Description: string read FDescription write FDescription;
-    property Language: string read FLanguage write FLanguage;
-    property Code: TStrings read GetCode write SetCode;
-  end;
+    FUNCTION GetCode: TStrings;
+    PROCEDURE SetCode(Value: TStrings);
+  PROTECTED
+    FUNCTION GetDisplayName: STRING; OVERRIDE;
+  PUBLIC
+    CONSTRUCTOR Create(Collection: TCollection); OVERRIDE;
+    DESTRUCTOR Destroy; OVERRIDE;
+    PROCEDURE Assign(Source: TPersistent); OVERRIDE;
+    FUNCTION MatchesLanguage(CONST ALanguage: STRING): Boolean;
+  PUBLISHED
+    PROPERTY Name: STRING READ FName WRITE FName;
+    PROPERTY Description: STRING READ FDescription WRITE FDescription;
+    PROPERTY Language: STRING READ FLanguage WRITE FLanguage;
+    PROPERTY Code: TStrings READ GetCode WRITE SetCode;
+  END;
 
-  TCodeTemplates = class(TOwnedCollection)
-  private
-    function GetItem(Index: Integer): TCodeTemplate;
-    procedure SetItem(Index: Integer; Value: TCodeTemplate);
-  public
-    constructor Create(AOwner: TPersistent);
-    function Add: TCodeTemplate;
-    function AddTemplate(const AName, ADescription, ALanguage, ACode: string): TCodeTemplate;
-    function FindByName(const AName, ALanguage: string): TCodeTemplate;
+  TCodeTemplates = CLASS(TOwnedCollection)
+  PRIVATE
+    FUNCTION GetItem(Index: Integer): TCodeTemplate;
+    PROCEDURE SetItem(Index: Integer; Value: TCodeTemplate);
+  PUBLIC
+    CONSTRUCTOR Create(AOwner: TPersistent);
+    FUNCTION Add: TCodeTemplate;
+    FUNCTION AddTemplate(CONST AName, ADescription, ALanguage, ACode: STRING): TCodeTemplate;
+    FUNCTION FindByName(CONST AName, ALanguage: STRING): TCodeTemplate;
     // Fills AList with templates for ALanguage ('' = any) whose name starts
     // with APrefix ('' = all), sorted by name.
-    procedure GetMatching(const ALanguage, APrefix: string; AList: TList<TCodeTemplate>);
-    property Items[Index: Integer]: TCodeTemplate read GetItem write SetItem; default;
-  end;
+    PROCEDURE GetMatching(CONST ALanguage, APrefix: STRING; AList: TList<TCodeTemplate>);
+    // JSON persistence: {"templates":[{"name","description","language","code"},...]}
+    PROCEDURE LoadFromFile(CONST FileName: STRING);
+    PROCEDURE SaveToFile(CONST FileName: STRING);
+    PROCEDURE LoadFromStream(Stream: TStream);
+    PROCEDURE SaveToStream(Stream: TStream);
+    PROPERTY Items[Index: Integer]: TCodeTemplate READ GetItem WRITE SetItem; DEFAULT;
+  END;
 
-  TCodeTemplateProvider = class(TComponent)
-  private
+  // Two template layers: Templates holds the application's built-in set
+  // (hard-coded or streamed from the DFM) and UserTemplates holds the end
+  // user's own additions, persisted as JSON in UserFileName. GetTemplates
+  // merges both; a user template hides a built-in one with the same name, so
+  // users can also override shipped templates.
+  TCodeTemplateProvider = CLASS(TComponent)
+  PRIVATE
     FTemplates: TCodeTemplates;
-    procedure SetTemplates(Value: TCodeTemplates);
-  public
-    constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
-    procedure GetTemplates(const ALanguage, APrefix: string; AList: TList<TCodeTemplate>); virtual;
-    procedure LoadFromFile(const FileName: string);
-    procedure SaveToFile(const FileName: string);
-    procedure LoadFromStream(Stream: TStream);
-    procedure SaveToStream(Stream: TStream);
-  published
-    property Templates: TCodeTemplates read FTemplates write SetTemplates;
-  end;
+    FUserFileName: STRING;
+    FUserTemplates: TCodeTemplates;
+    PROCEDURE SetTemplates(Value: TCodeTemplates);
+    PROCEDURE SetUserTemplates(Value: TCodeTemplates);
+  PUBLIC
+    CONSTRUCTOR Create(AOwner: TComponent); OVERRIDE;
+    DESTRUCTOR Destroy; OVERRIDE;
+    PROCEDURE GetTemplates(CONST ALanguage, APrefix: STRING; AList: TList<TCodeTemplate>); VIRTUAL;
+    // Loads UserTemplates from UserFileName; quietly does nothing when the
+    // file does not exist yet (first run).
+    PROCEDURE LoadUserTemplates;
+    PROCEDURE SaveUserTemplates;
+    // Operate on the built-in Templates collection.
+    PROCEDURE LoadFromFile(CONST FileName: STRING);
+    PROCEDURE SaveToFile(CONST FileName: STRING);
+    PROCEDURE LoadFromStream(Stream: TStream);
+    PROCEDURE SaveToStream(Stream: TStream);
+    PROPERTY UserTemplates: TCodeTemplates READ FUserTemplates WRITE SetUserTemplates;
+  PUBLISHED
+    PROPERTY Templates: TCodeTemplates READ FTemplates WRITE SetTemplates;
+    PROPERTY UserFileName: STRING READ FUserFileName WRITE FUserFileName;
+  END;
 
 // Applies AIndent to every line after the first and resolves the caret
 // marker: the first unescaped '|' is removed and reported in ACaretLine /
 // ACaretColumn (0-based offsets within the returned text); '||' becomes a
 // literal '|'. One trailing line break is dropped so TStrings.Text round-trips
 // without appending an empty line.
-function ExpandCodeTemplate(const ATemplateText, AIndent: string;
-  out ACaretLine, ACaretColumn: Integer; out AHasCaret: Boolean): string;
+FUNCTION ExpandCodeTemplate(CONST ATemplateText, AIndent: STRING;
+  OUT ACaretLine, ACaretColumn: Integer; OUT AHasCaret: Boolean): STRING;
 
-implementation
+IMPLEMENTATION
 
-uses
+USES
   System.Generics.Defaults,
   System.JSON,
   System.StrUtils,
   System.SysUtils;
 
-function ExpandCodeTemplate(const ATemplateText, AIndent: string;
-  out ACaretLine, ACaretColumn: Integer; out AHasCaret: Boolean): string;
-var
-  Text: string;
-  Lines: TStringList;
-  Line: string;
-  Builder: TStringBuilder;
-  Column: Integer;
-  I, J: Integer;
-begin
+FUNCTION ExpandCodeTemplate(CONST ATemplateText, AIndent: STRING;
+  OUT ACaretLine, ACaretColumn: Integer; OUT AHasCaret: Boolean): STRING;
+VAR
+  Text              : STRING;
+  Lines             : TStringList;
+  Line              : STRING;
+  Builder           : TStringBuilder;
+  Column            : Integer;
+  I, J              : Integer;
+BEGIN
   ACaretLine := 0;
   ACaretColumn := 0;
   AHasCaret := False;
 
   Text := StringReplace(ATemplateText, #13#10, #10, [rfReplaceAll]);
   Text := StringReplace(Text, #13, #10, [rfReplaceAll]);
-  if (Text <> '') and (Text[Length(Text)] = #10) then
+  IF (Text <> '') AND (Text[Length(Text)] = #10) THEN
     SetLength(Text, Length(Text) - 1);
 
   Lines := TStringList.Create;
   Builder := TStringBuilder.Create;
-  try
+  TRY
     Lines.LineBreak := #10;
     Lines.Text := Text;
-    if Lines.Count = 0 then
+    IF Lines.Count = 0 THEN
       Lines.Add('');
 
-    for I := 0 to Lines.Count - 1 do
-    begin
+    FOR I := 0 TO Lines.Count - 1 DO BEGIN
       Line := Lines[I];
       Column := 0;
-      if I > 0 then
-      begin
+      IF I > 0 THEN BEGIN
         Builder.Append(sLineBreak);
         Builder.Append(AIndent);
         Column := Length(AIndent);
-      end;
+      END;
 
       J := 1;
-      while J <= Length(Line) do
-      begin
-        if Line[J] = '|' then
-        begin
-          if (J < Length(Line)) and (Line[J + 1] = '|') then
-          begin
+      WHILE J <= Length(Line) DO BEGIN
+        IF Line[J] = '|' THEN BEGIN
+          IF (J < Length(Line)) AND (Line[J + 1] = '|') THEN BEGIN
             Builder.Append('|');
             Inc(Column);
             Inc(J, 2);
             Continue;
-          end;
-          if not AHasCaret then
-          begin
+          END;
+          IF NOT AHasCaret THEN BEGIN
             AHasCaret := True;
             ACaretLine := I;
             ACaretColumn := Column;
-          end
-          else
-          begin
+          END ELSE BEGIN
             Builder.Append('|');
             Inc(Column);
-          end;
+          END;
           Inc(J);
           Continue;
-        end;
+        END;
         Builder.Append(Line[J]);
         Inc(Column);
         Inc(J);
-      end;
-    end;
+      END;
+    END;
     Result := Builder.ToString;
-  finally
+  FINALLY
     Builder.Free;
     Lines.Free;
-  end;
-end;
+  END;
+END;
 
 { TCodeTemplate }
 
-constructor TCodeTemplate.Create(Collection: TCollection);
-begin
-  inherited;
+CONSTRUCTOR TCodeTemplate.Create(Collection: TCollection);
+BEGIN
+  INHERITED;
   FCode := TStringList.Create;
-end;
+END;
 
-destructor TCodeTemplate.Destroy;
-begin
+DESTRUCTOR TCodeTemplate.Destroy;
+BEGIN
   FCode.Free;
-  inherited;
-end;
+  INHERITED;
+END;
 
-procedure TCodeTemplate.Assign(Source: TPersistent);
-begin
-  if Source is TCodeTemplate then
-  begin
+PROCEDURE TCodeTemplate.Assign(Source: TPersistent);
+BEGIN
+  IF Source IS TCodeTemplate THEN BEGIN
     FName := TCodeTemplate(Source).FName;
     FDescription := TCodeTemplate(Source).FDescription;
     FLanguage := TCodeTemplate(Source).FLanguage;
     FCode.Assign(TCodeTemplate(Source).FCode);
-  end
-  else
-    inherited;
-end;
+  END ELSE
+    INHERITED;
+END;
 
-function TCodeTemplate.GetDisplayName: string;
-begin
+FUNCTION TCodeTemplate.GetDisplayName: STRING;
+BEGIN
   Result := FName;
-  if FLanguage <> '' then
+  IF FLanguage <> '' THEN
     Result := Result + ' (' + FLanguage + ')';
-  if Result = '' then
-    Result := inherited GetDisplayName;
-end;
+  IF Result = '' THEN
+    Result := INHERITED GetDisplayName;
+END;
 
-function TCodeTemplate.GetCode: TStrings;
-begin
+FUNCTION TCodeTemplate.GetCode: TStrings;
+BEGIN
   Result := FCode;
-end;
+END;
 
-procedure TCodeTemplate.SetCode(Value: TStrings);
-begin
+PROCEDURE TCodeTemplate.SetCode(Value: TStrings);
+BEGIN
   FCode.Assign(Value);
-end;
+END;
 
-function TCodeTemplate.MatchesLanguage(const ALanguage: string): Boolean;
-begin
-  Result := (FLanguage = '') or (ALanguage = '') or SameText(FLanguage, ALanguage);
-end;
+FUNCTION TCodeTemplate.MatchesLanguage(CONST ALanguage: STRING): Boolean;
+BEGIN
+  Result := (FLanguage = '') OR (ALanguage = '') OR SameText(FLanguage, ALanguage);
+END;
 
 { TCodeTemplates }
 
-constructor TCodeTemplates.Create(AOwner: TPersistent);
-begin
-  inherited Create(AOwner, TCodeTemplate);
-end;
+CONSTRUCTOR TCodeTemplates.Create(AOwner: TPersistent);
+BEGIN
+  INHERITED Create(AOwner, TCodeTemplate);
+END;
 
-function TCodeTemplates.GetItem(Index: Integer): TCodeTemplate;
-begin
-  Result := TCodeTemplate(inherited Items[Index]);
-end;
+FUNCTION TCodeTemplates.GetItem(Index: Integer): TCodeTemplate;
+BEGIN
+  Result := TCodeTemplate(INHERITED Items[Index]);
+END;
 
-procedure TCodeTemplates.SetItem(Index: Integer; Value: TCodeTemplate);
-begin
-  inherited Items[Index] := Value;
-end;
+PROCEDURE TCodeTemplates.SetItem(Index: Integer; Value: TCodeTemplate);
+BEGIN
+  INHERITED Items[Index] := Value;
+END;
 
-function TCodeTemplates.Add: TCodeTemplate;
-begin
-  Result := TCodeTemplate(inherited Add);
-end;
+FUNCTION TCodeTemplates.Add: TCodeTemplate;
+BEGIN
+  Result := TCodeTemplate(INHERITED Add);
+END;
 
-function TCodeTemplates.AddTemplate(const AName, ADescription, ALanguage,
-  ACode: string): TCodeTemplate;
-begin
+FUNCTION TCodeTemplates.AddTemplate(CONST AName, ADescription, ALanguage,
+  ACode: STRING): TCodeTemplate;
+BEGIN
   Result := Add;
   Result.Name := AName;
   Result.Description := ADescription;
   Result.Language := ALanguage;
   Result.Code.Text := ACode;
-end;
+END;
 
-function TCodeTemplates.FindByName(const AName, ALanguage: string): TCodeTemplate;
-var
-  I: Integer;
-begin
-  for I := 0 to Count - 1 do
-    if SameText(Items[I].Name, AName) and Items[I].MatchesLanguage(ALanguage) then
+FUNCTION TCodeTemplates.FindByName(CONST AName, ALanguage: STRING): TCodeTemplate;
+VAR
+  I                 : Integer;
+BEGIN
+  FOR I := 0 TO Count - 1 DO
+    IF SameText(Items[I].Name, AName) AND Items[I].MatchesLanguage(ALanguage) THEN
       Exit(Items[I]);
-  Result := nil;
-end;
+  Result := NIL;
+END;
 
-procedure TCodeTemplates.GetMatching(const ALanguage, APrefix: string;
-  AList: TList<TCodeTemplate>);
-var
-  I: Integer;
-  Item: TCodeTemplate;
-begin
-  for I := 0 to Count - 1 do
-  begin
-    Item := Items[I];
-    if Item.MatchesLanguage(ALanguage) and
-      ((APrefix = '') or StartsText(APrefix, Item.Name)) then
-      AList.Add(Item);
-  end;
-
+PROCEDURE SortTemplatesByName(AList: TList<TCodeTemplate>);
+BEGIN
   AList.Sort(TComparer<TCodeTemplate>.Construct(
-    function(const Left, Right: TCodeTemplate): Integer
-    begin
+    FUNCTION(CONST Left, Right: TCodeTemplate): Integer
+    BEGIN
       Result := CompareText(Left.Name, Right.Name);
-    end));
-end;
+    END));
+END;
 
-{ TCodeTemplateProvider }
-
-constructor TCodeTemplateProvider.Create(AOwner: TComponent);
-begin
-  inherited;
-  FTemplates := TCodeTemplates.Create(Self);
-end;
-
-destructor TCodeTemplateProvider.Destroy;
-begin
-  FTemplates.Free;
-  inherited;
-end;
-
-procedure TCodeTemplateProvider.SetTemplates(Value: TCodeTemplates);
-begin
-  FTemplates.Assign(Value);
-end;
-
-procedure TCodeTemplateProvider.GetTemplates(const ALanguage, APrefix: string;
+PROCEDURE TCodeTemplates.GetMatching(CONST ALanguage, APrefix: STRING;
   AList: TList<TCodeTemplate>);
-begin
-  FTemplates.GetMatching(ALanguage, APrefix, AList);
-end;
+VAR
+  I                 : Integer;
+  Item              : TCodeTemplate;
+BEGIN
+  FOR I := 0 TO Count - 1 DO BEGIN
+    Item := Items[I];
+    IF Item.MatchesLanguage(ALanguage) AND
+      ((APrefix = '') OR StartsText(APrefix, Item.Name)) THEN
+      AList.Add(Item);
+  END;
 
-procedure TCodeTemplateProvider.SaveToStream(Stream: TStream);
-var
-  Root: TJSONObject;
-  Arr: TJSONArray;
-  Obj: TJSONObject;
-  I: Integer;
-  Bytes: TBytes;
-begin
+  SortTemplatesByName(AList);
+END;
+
+PROCEDURE TCodeTemplates.SaveToStream(Stream: TStream);
+VAR
+  Root              : TJSONObject;
+  Arr               : TJSONArray;
+  Obj               : TJSONObject;
+  I                 : Integer;
+  Bytes             : TBytes;
+BEGIN
   Root := TJSONObject.Create;
-  try
+  TRY
     Arr := TJSONArray.Create;
     Root.AddPair('templates', Arr);
-    for I := 0 to FTemplates.Count - 1 do
-    begin
+    FOR I := 0 TO Count - 1 DO BEGIN
       Obj := TJSONObject.Create;
-      Obj.AddPair('name', FTemplates[I].Name);
-      Obj.AddPair('description', FTemplates[I].Description);
-      Obj.AddPair('language', FTemplates[I].Language);
-      Obj.AddPair('code', FTemplates[I].Code.Text);
+      Obj.AddPair('name', Items[I].Name);
+      Obj.AddPair('description', Items[I].Description);
+      Obj.AddPair('language', Items[I].Language);
+      Obj.AddPair('code', Items[I].Code.Text);
       Arr.AddElement(Obj);
-    end;
+    END;
     Bytes := TEncoding.UTF8.GetBytes(Root.Format(2));
     Stream.WriteBuffer(Bytes, Length(Bytes));
-  finally
+  FINALLY
     Root.Free;
-  end;
-end;
+  END;
+END;
 
-procedure TCodeTemplateProvider.LoadFromStream(Stream: TStream);
-var
-  Bytes: TBytes;
-  Value: TJSONValue;
-  Arr: TJSONArray;
-  Obj: TJSONObject;
-  Element: TJSONValue;
-  Item: TCodeTemplate;
-begin
+PROCEDURE TCodeTemplates.LoadFromStream(Stream: TStream);
+VAR
+  Bytes             : TBytes;
+  Value             : TJSONValue;
+  Arr               : TJSONArray;
+  Obj               : TJSONObject;
+  Element           : TJSONValue;
+  Item              : TCodeTemplate;
+BEGIN
   SetLength(Bytes, Stream.Size - Stream.Position);
-  if Length(Bytes) > 0 then
+  IF Length(Bytes) > 0 THEN
     Stream.ReadBuffer(Bytes, Length(Bytes));
 
   Value := TJSONObject.ParseJSONValue(TEncoding.UTF8.GetString(Bytes));
-  if not Assigned(Value) then
-    raise EStreamError.Create('Invalid template file: not valid JSON');
-  try
-    if Value is TJSONArray then
+  IF NOT Assigned(Value) THEN
+    RAISE EStreamError.Create('Invalid template file: not valid JSON');
+  TRY
+    IF Value IS TJSONArray THEN
       Arr := TJSONArray(Value)
-    else if (Value is TJSONObject) and
-      (TJSONObject(Value).GetValue('templates') is TJSONArray) then
+    ELSE IF (Value IS TJSONObject) AND
+      (TJSONObject(Value).GetValue('templates') IS TJSONArray) THEN
       Arr := TJSONArray(TJSONObject(Value).GetValue('templates'))
-    else
-      raise EStreamError.Create('Invalid template file: no template list found');
+    ELSE
+      RAISE EStreamError.Create('Invalid template file: no template list found');
 
-    FTemplates.BeginUpdate;
-    try
-      FTemplates.Clear;
-      for Element in Arr do
-        if Element is TJSONObject then
-        begin
+    BeginUpdate;
+    TRY
+      Clear;
+      FOR Element IN Arr DO
+        IF Element IS TJSONObject THEN BEGIN
           Obj := TJSONObject(Element);
-          Item := FTemplates.Add;
-          Item.Name := Obj.GetValue<string>('name', '');
-          Item.Description := Obj.GetValue<string>('description', '');
-          Item.Language := Obj.GetValue<string>('language', '');
-          Item.Code.Text := Obj.GetValue<string>('code', '');
-        end;
-    finally
-      FTemplates.EndUpdate;
-    end;
-  finally
+          Item := Add;
+          Item.Name := Obj.GetValue<STRING>('name', '');
+          Item.Description := Obj.GetValue<STRING>('description', '');
+          Item.Language := Obj.GetValue<STRING>('language', '');
+          Item.Code.Text := Obj.GetValue<STRING>('code', '');
+        END;
+    FINALLY
+      EndUpdate;
+    END;
+  FINALLY
     Value.Free;
-  end;
-end;
+  END;
+END;
 
-procedure TCodeTemplateProvider.SaveToFile(const FileName: string);
-var
-  Stream: TFileStream;
-begin
+PROCEDURE TCodeTemplates.SaveToFile(CONST FileName: STRING);
+VAR
+  Stream            : TFileStream;
+BEGIN
   Stream := TFileStream.Create(FileName, fmCreate);
-  try
+  TRY
     SaveToStream(Stream);
-  finally
+  FINALLY
     Stream.Free;
-  end;
-end;
+  END;
+END;
 
-procedure TCodeTemplateProvider.LoadFromFile(const FileName: string);
-var
-  Stream: TFileStream;
-begin
-  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
-  try
+PROCEDURE TCodeTemplates.LoadFromFile(CONST FileName: STRING);
+VAR
+  Stream            : TFileStream;
+BEGIN
+  Stream := TFileStream.Create(FileName, fmOpenRead OR fmShareDenyWrite);
+  TRY
     LoadFromStream(Stream);
-  finally
+  FINALLY
     Stream.Free;
-  end;
-end;
+  END;
+END;
 
-end.
+{ TCodeTemplateProvider }
+
+CONSTRUCTOR TCodeTemplateProvider.Create(AOwner: TComponent);
+BEGIN
+  INHERITED;
+  FTemplates := TCodeTemplates.Create(Self);
+  FUserTemplates := TCodeTemplates.Create(Self);
+END;
+
+DESTRUCTOR TCodeTemplateProvider.Destroy;
+BEGIN
+  FUserTemplates.Free;
+  FTemplates.Free;
+  INHERITED;
+END;
+
+PROCEDURE TCodeTemplateProvider.SetTemplates(Value: TCodeTemplates);
+BEGIN
+  FTemplates.Assign(Value);
+END;
+
+PROCEDURE TCodeTemplateProvider.SetUserTemplates(Value: TCodeTemplates);
+BEGIN
+  FUserTemplates.Assign(Value);
+END;
+
+PROCEDURE TCodeTemplateProvider.GetTemplates(CONST ALanguage, APrefix: STRING;
+  AList: TList<TCodeTemplate>);
+VAR
+  UserMatches       : TList<TCodeTemplate>;
+  BuiltInMatches    : TList<TCodeTemplate>;
+  Item              : TCodeTemplate;
+  UserItem          : TCodeTemplate;
+  Hidden            : Boolean;
+BEGIN
+  UserMatches := TList<TCodeTemplate>.Create;
+  BuiltInMatches := TList<TCodeTemplate>.Create;
+  TRY
+    FUserTemplates.GetMatching(ALanguage, APrefix, UserMatches);
+    FTemplates.GetMatching(ALanguage, APrefix, BuiltInMatches);
+
+    AList.AddRange(UserMatches);
+    FOR Item IN BuiltInMatches DO BEGIN
+      Hidden := False;
+      FOR UserItem IN UserMatches DO
+        IF SameText(UserItem.Name, Item.Name) THEN BEGIN
+          Hidden := True;
+          Break;
+        END;
+      IF NOT Hidden THEN
+        AList.Add(Item);
+    END;
+
+    SortTemplatesByName(AList);
+  FINALLY
+    BuiltInMatches.Free;
+    UserMatches.Free;
+  END;
+END;
+
+PROCEDURE TCodeTemplateProvider.LoadUserTemplates;
+BEGIN
+  IF (FUserFileName <> '') AND FileExists(FUserFileName) THEN
+    FUserTemplates.LoadFromFile(FUserFileName);
+END;
+
+PROCEDURE TCodeTemplateProvider.SaveUserTemplates;
+BEGIN
+  IF FUserFileName = '' THEN
+    RAISE EStreamError.Create('Cannot save user templates: UserFileName is not set');
+  FUserTemplates.SaveToFile(FUserFileName);
+END;
+
+PROCEDURE TCodeTemplateProvider.SaveToStream(Stream: TStream);
+BEGIN
+  FTemplates.SaveToStream(Stream);
+END;
+
+PROCEDURE TCodeTemplateProvider.LoadFromStream(Stream: TStream);
+BEGIN
+  FTemplates.LoadFromStream(Stream);
+END;
+
+PROCEDURE TCodeTemplateProvider.SaveToFile(CONST FileName: STRING);
+BEGIN
+  FTemplates.SaveToFile(FileName);
+END;
+
+PROCEDURE TCodeTemplateProvider.LoadFromFile(CONST FileName: STRING);
+BEGIN
+  FTemplates.LoadFromFile(FileName);
+END;
+
+END.
+

@@ -1,14 +1,14 @@
-unit CodeEdit.Register;
+UNIT CodeEdit.Register;
 
-interface
+INTERFACE
 
-procedure Register;
+PROCEDURE Register;
 
-implementation
+IMPLEMENTATION
 
 {$R *.dcr}
 
-uses
+USES
   System.Classes,
   DesignEditors,
   DesignIntf,
@@ -18,50 +18,51 @@ uses
   CodeEdit.TemplateEditorDlg,
   CodeEdit.Templates;
 
-type
+TYPE
   // Double-clicking a TCodeTemplateProvider (or its context menu verb) opens
   // the template editor dialog on the design-time component.
-  TCodeTemplateProviderEditor = class(TComponentEditor)
-  public
-    procedure ExecuteVerb(Index: Integer); override;
-    function GetVerb(Index: Integer): string; override;
-    function GetVerbCount: Integer; override;
-  end;
+  TCodeTemplateProviderEditor = CLASS(TComponentEditor)
+  PUBLIC
+    PROCEDURE ExecuteVerb(Index: Integer); OVERRIDE;
+    FUNCTION GetVerb(Index: Integer): STRING; OVERRIDE;
+    FUNCTION GetVerbCount: Integer; OVERRIDE;
+  END;
 
-procedure TCodeTemplateProviderEditor.ExecuteVerb(Index: Integer);
-begin
-  if Index = 0 then
-    if TCodeTemplateEditorDialog.Execute(TCodeTemplateProvider(Component)) then
+PROCEDURE TCodeTemplateProviderEditor.ExecuteVerb(Index: Integer);
+BEGIN
+  IF Index = 0 THEN
+    IF TCodeTemplateEditorDialog.Execute(TCodeTemplateProvider(Component)) THEN
       Designer.Modified;
-end;
+END;
 
-function TCodeTemplateProviderEditor.GetVerb(Index: Integer): string;
-begin
+FUNCTION TCodeTemplateProviderEditor.GetVerb(Index: Integer): STRING;
+BEGIN
   Result := 'Edit Templates...';
-end;
+END;
 
-function TCodeTemplateProviderEditor.GetVerbCount: Integer;
-begin
+FUNCTION TCodeTemplateProviderEditor.GetVerbCount: Integer;
+BEGIN
   Result := 1;
-end;
+END;
 
-procedure Register;
-begin
+PROCEDURE Register;
+BEGIN
   RegisterComponents('CodeEdit', [
-    TCodeEditor,
-    TKeywordCompletionProvider,
-    TCodeTemplateProvider,
-    TDelphiCodeHighlighter,
-    TJavaScriptCodeHighlighter,
-    TSqlCodeHighlighter,
-    TTungliCodeHighlighter,
-    TBatchCodeHighlighter,
-    TPowerShellCodeHighlighter,
-    TIniCodeHighlighter,
-    TYamlCodeHighlighter,
-    TPythonCodeHighlighter
-  ]);
+      TCodeEditor,
+      TKeywordCompletionProvider,
+      TCodeTemplateProvider,
+      TDelphiCodeHighlighter,
+      TJavaScriptCodeHighlighter,
+      TSqlCodeHighlighter,
+      TTungliCodeHighlighter,
+      TBatchCodeHighlighter,
+      TPowerShellCodeHighlighter,
+      TIniCodeHighlighter,
+      TYamlCodeHighlighter,
+      TPythonCodeHighlighter
+      ]);
   RegisterComponentEditor(TCodeTemplateProvider, TCodeTemplateProviderEditor);
-end;
+END;
 
-end.
+END.
+

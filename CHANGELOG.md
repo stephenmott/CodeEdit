@@ -6,6 +6,19 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- User template layer: `TCodeTemplateProvider.UserTemplates` +
+  `UserFileName` with `LoadUserTemplates` / `SaveUserTemplates`, merged into
+  the Ctrl+J popup on top of the built-in `Templates` — a user template with
+  the same name overrides the built-in one. The template editor dialog's
+  `Execute(AProvider)` now edits the user layer (built-ins shown read-only;
+  Duplicate creates an editable user copy that keeps the name, i.e. an
+  override) and auto-saves to `UserFileName` on OK. JSON persistence moved
+  down to `TCodeTemplates` (`LoadFromFile` / `SaveToFile` / streams); the
+  provider-level methods still operate on the built-in layer.
+- DevExpress skin bridge (`Source\CodeEdit.DevExpressTheme.pas`, not in the
+  package): `ApplyDevExpressThemeToEditor` maps the active skin's palette
+  onto the editor theme, and `TCodeEditorDevExpressTheme` keeps attached
+  editors in sync with runtime skin changes.
 - Code templates (Ctrl+J): new `CodeEdit.Templates` unit with a
   `TCodeTemplateProvider` component holding a published `Templates` collection
   (`Name`, `Description`, `Language`, `Code`). Assign it to the editor's new

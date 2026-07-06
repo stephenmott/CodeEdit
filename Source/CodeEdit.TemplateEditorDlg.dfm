@@ -120,6 +120,9 @@ object CodeTemplateEditorDialog: TCodeTemplateEditorDialog
       BevelOuter = bvNone
       ShowCaption = False
       TabOrder = 0
+      DesignSize = (
+        584
+        108)
       object LabelName: TLabel
         Left = 14
         Top = 15
@@ -130,14 +133,14 @@ object CodeTemplateEditorDialog: TCodeTemplateEditorDialog
       object LabelLanguage: TLabel
         Left = 324
         Top = 15
-        Width = 57
+        Width = 55
         Height = 15
         Caption = 'Language:'
       end
       object LabelDescription: TLabel
         Left = 14
         Top = 49
-        Width = 66
+        Width = 63
         Height = 15
         Caption = 'Description:'
       end
@@ -193,10 +196,11 @@ object CodeTemplateEditorDialog: TCodeTemplateEditorDialog
       Lines.Strings = (
         '')
       LineMarkers = <>
-      Options.ShowMinimap = False
+      Modified = True
+      Options.LineCommentPrefix = '//'
       TabOrder = 1
-      Breakpoints = <>
       OnChange = CodeEditorChange
+      Breakpoints = <>
     end
   end
   object PanelBottom: TPanel
@@ -208,6 +212,9 @@ object CodeTemplateEditorDialog: TCodeTemplateEditorDialog
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 2
+    DesignSize = (
+      920
+      48)
     object LabelHint: TLabel
       Left = 12
       Top = 16
@@ -215,9 +222,9 @@ object CodeTemplateEditorDialog: TCodeTemplateEditorDialog
       Height = 15
       Anchors = [akLeft, akRight, akBottom]
       AutoSize = False
-      Caption =
-        'Use | in the code to mark where the caret lands after insertion' +
-        '; || gives a literal |.'
+      Caption = 
+        'Use | in the code to mark where the caret lands after insertion;' +
+        ' || gives a literal |.'
     end
     object ButtonOK: TButton
       Left = 730

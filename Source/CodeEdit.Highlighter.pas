@@ -1,13 +1,13 @@
-unit CodeEdit.Highlighter;
+UNIT CodeEdit.Highlighter;
 
-interface
+INTERFACE
 
-uses
+USES
   System.Classes,
   System.Generics.Collections,
   Vcl.Graphics;
 
-type
+TYPE
   TCodeTokenKind = (
     tkText,
     tkWhitespace,
@@ -17,243 +17,241 @@ type
     tkKeyword,
     tkIdentifier,
     tkSymbol
-  );
+    );
 
-  TCodeToken = record
+  TCodeToken = RECORD
     Start: Integer;
     Length: Integer;
     Kind: TCodeTokenKind;
-  end;
+  END;
 
   TCodeTokenArray = TArray<TCodeToken>;
 
-  TCodeTextStyle = record
+  TCodeTextStyle = RECORD
     Foreground: TColor;
     Background: TColor;
     FontStyle: TFontStyles;
-  end;
+  END;
 
-  TCustomCodeHighlighter = class(TComponent)
-  private
-    FStyles: array[TCodeTokenKind] of TCodeTextStyle;
-    function GetStyle(Kind: TCodeTokenKind): TCodeTextStyle;
-    procedure SetStyle(Kind: TCodeTokenKind; const Value: TCodeTextStyle);
-  protected
-    procedure SetDefaultStyles; virtual;
-  public
-    constructor Create(AOwner: TComponent); override;
+  TCustomCodeHighlighter = CLASS(TComponent)
+  PRIVATE
+    FStyles: ARRAY[TCodeTokenKind] OF TCodeTextStyle;
+    FUNCTION GetStyle(Kind: TCodeTokenKind): TCodeTextStyle;
+    PROCEDURE SetStyle(Kind: TCodeTokenKind; CONST Value: TCodeTextStyle);
+  PROTECTED
+    PROCEDURE SetDefaultStyles; VIRTUAL;
+  PUBLIC
+    CONSTRUCTOR Create(AOwner: TComponent); OVERRIDE;
     // Human-readable language identifier, used to group code templates and
     // similar per-language data. Defaults to the class name without the 'T'
     // prefix and 'CodeHighlighter' suffix, e.g. TDelphiCodeHighlighter ->
     // 'Delphi'. Override for casing the derivation cannot produce ('SQL').
-    class function LanguageName: string; virtual;
-    function TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray; virtual;
+    CLASS FUNCTION LanguageName: STRING; VIRTUAL;
+    FUNCTION TokenizeLine(CONST ALine: STRING; ALineIndex: Integer): TCodeTokenArray; VIRTUAL;
     // Stateful tokenization for constructs that span lines (block comments,
     // multi-line strings). StartState is the state the previous line ended in;
     // 0 means "nothing open". Stateless highlighters ignore it.
-    function TokenizeLineState(const ALine: string; StartState: Integer;
-      out EndState: Integer): TCodeTokenArray; virtual;
-    property Styles[Kind: TCodeTokenKind]: TCodeTextStyle read GetStyle write SetStyle;
-  end;
+    FUNCTION TokenizeLineState(CONST ALine: STRING; StartState: Integer;
+      OUT EndState: Integer): TCodeTokenArray; VIRTUAL;
+    PROPERTY Styles[Kind: TCodeTokenKind]: TCodeTextStyle READ GetStyle WRITE SetStyle;
+  END;
 
-  TCodeHighlighterClass = class of TCustomCodeHighlighter;
+  TCodeHighlighterClass = CLASS OF TCustomCodeHighlighter;
 
   // A construct that may span lines, e.g. '(*' .. '*)' or '"""' .. '"""'.
   // Its 1-based index in the registration order is the line state value used
   // by TokenizeLineState while the construct is open.
-  TCodeMultiLineRange = record
-    StartDelimiter: string;
-    EndDelimiter: string;
+  TCodeMultiLineRange = RECORD
+    StartDelimiter: STRING;
+    EndDelimiter: STRING;
     Kind: TCodeTokenKind;
-  end;
+  END;
 
-  TCustomWordCodeHighlighter = class(TCustomCodeHighlighter)
-  private
-    FKeywords: TDictionary<string, Boolean>;
+  TCustomWordCodeHighlighter = CLASS(TCustomCodeHighlighter)
+  PRIVATE
+    FKeywords: TDictionary<STRING, Boolean>;
     FMultiLineRanges: TList<TCodeMultiLineRange>;
-  protected
-    procedure AddKeyword(const Value: string);
-    procedure AddKeywords(const Values: array of string);
-    procedure AddMultiLineRange(const AStartDelimiter, AEndDelimiter: string;
+  PROTECTED
+    PROCEDURE AddKeyword(CONST Value: STRING);
+    PROCEDURE AddKeywords(CONST Values: ARRAY OF STRING);
+    PROCEDURE AddMultiLineRange(CONST AStartDelimiter, AEndDelimiter: STRING;
       AKind: TCodeTokenKind = tkComment);
-    procedure BuildKeywords; virtual;
-    procedure BuildMultiLineRanges; virtual;
-    function CaseSensitive: Boolean; virtual;
-    function KeywordKey(const Value: string): string;
-    function IsKeyword(const Value: string): Boolean; virtual;
-    function IsIdentifierStart(Ch: Char): Boolean; virtual;
-    function IsIdentifierChar(Ch: Char): Boolean; virtual;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; virtual;
-    function IsNumberStart(const ALine: string; Index: Integer): Boolean; virtual;
-    function IsStringStart(Ch: Char): Boolean; virtual;
-    function ReadIdentifier(const ALine: string; Index: Integer): Integer; virtual;
-    function ReadNumber(const ALine: string; Index: Integer): Integer; virtual;
-    function ReadString(const ALine: string; Index: Integer): Integer; virtual;
-    function TokenKindForIdentifier(const Value: string): TCodeTokenKind; virtual;
-  public
-    constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
-    function TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray; override;
-    function TokenizeLineState(const ALine: string; StartState: Integer;
-      out EndState: Integer): TCodeTokenArray; override;
-  end;
+    PROCEDURE BuildKeywords; VIRTUAL;
+    PROCEDURE BuildMultiLineRanges; VIRTUAL;
+    FUNCTION CaseSensitive: Boolean; VIRTUAL;
+    FUNCTION KeywordKey(CONST Value: STRING): STRING;
+    FUNCTION IsKeyword(CONST Value: STRING): Boolean; VIRTUAL;
+    FUNCTION IsIdentifierStart(Ch: Char): Boolean; VIRTUAL;
+    FUNCTION IsIdentifierChar(Ch: Char): Boolean; VIRTUAL;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; VIRTUAL;
+    FUNCTION IsNumberStart(CONST ALine: STRING; Index: Integer): Boolean; VIRTUAL;
+    FUNCTION IsStringStart(Ch: Char): Boolean; VIRTUAL;
+    FUNCTION ReadIdentifier(CONST ALine: STRING; Index: Integer): Integer; VIRTUAL;
+    FUNCTION ReadNumber(CONST ALine: STRING; Index: Integer): Integer; VIRTUAL;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; VIRTUAL;
+    FUNCTION TokenKindForIdentifier(CONST Value: STRING): TCodeTokenKind; VIRTUAL;
+  PUBLIC
+    CONSTRUCTOR Create(AOwner: TComponent); OVERRIDE;
+    DESTRUCTOR Destroy; OVERRIDE;
+    FUNCTION TokenizeLine(CONST ALine: STRING; ALineIndex: Integer): TCodeTokenArray; OVERRIDE;
+    FUNCTION TokenizeLineState(CONST ALine: STRING; StartState: Integer;
+      OUT EndState: Integer): TCodeTokenArray; OVERRIDE;
+  END;
 
-  TDelphiCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    procedure BuildMultiLineRanges; override;
-    function IsNumberStart(const ALine: string; Index: Integer): Boolean; override;
-    function ReadNumber(const ALine: string; Index: Integer): Integer; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-    procedure SetDefaultStyles; override;
-  end;
+  TDelphiCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    PROCEDURE BuildMultiLineRanges; OVERRIDE;
+    FUNCTION IsNumberStart(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION ReadNumber(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+    PROCEDURE SetDefaultStyles; OVERRIDE;
+  END;
 
-  TJavaScriptCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    procedure BuildMultiLineRanges; override;
-    function CaseSensitive: Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadNumber(const ALine: string; Index: Integer): Integer; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  end;
+  TJavaScriptCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    PROCEDURE BuildMultiLineRanges; OVERRIDE;
+    FUNCTION CaseSensitive: Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadNumber(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  END;
 
-  TSqlCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    procedure BuildMultiLineRanges; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  public
-    class function LanguageName: string; override;
-  end;
+  TSqlCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    PROCEDURE BuildMultiLineRanges; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  PUBLIC
+    CLASS FUNCTION LanguageName: STRING; OVERRIDE;
+  END;
 
-  TTungliCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    procedure BuildMultiLineRanges; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  end;
+  TTungliCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    PROCEDURE BuildMultiLineRanges; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  END;
 
-  TBatchCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  end;
+  TBatchCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  END;
 
-  TPowerShellCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    procedure BuildMultiLineRanges; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  end;
+  TPowerShellCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    PROCEDURE BuildMultiLineRanges; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  END;
 
-  TIniCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  public
-    class function LanguageName: string; override;
-  end;
+  TIniCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  PUBLIC
+    CLASS FUNCTION LanguageName: STRING; OVERRIDE;
+  END;
 
-  TYamlCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  public
-    class function LanguageName: string; override;
-  end;
+  TYamlCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  PUBLIC
+    CLASS FUNCTION LanguageName: STRING; OVERRIDE;
+  END;
 
-  TPythonCodeHighlighter = class(TCustomWordCodeHighlighter)
-  protected
-    procedure BuildKeywords; override;
-    procedure BuildMultiLineRanges; override;
-    function CaseSensitive: Boolean; override;
-    function IsLineComment(const ALine: string; Index: Integer): Boolean; override;
-    function IsStringStart(Ch: Char): Boolean; override;
-    function ReadNumber(const ALine: string; Index: Integer): Integer; override;
-    function ReadString(const ALine: string; Index: Integer): Integer; override;
-  end;
+  TPythonCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
+  PROTECTED
+    PROCEDURE BuildKeywords; OVERRIDE;
+    PROCEDURE BuildMultiLineRanges; OVERRIDE;
+    FUNCTION CaseSensitive: Boolean; OVERRIDE;
+    FUNCTION IsLineComment(CONST ALine: STRING; Index: Integer): Boolean; OVERRIDE;
+    FUNCTION IsStringStart(Ch: Char): Boolean; OVERRIDE;
+    FUNCTION ReadNumber(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+    FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
+  END;
 
-implementation
+IMPLEMENTATION
 
-uses
+USES
   System.Character,
   System.StrUtils,
   System.SysUtils;
 
-function MakeToken(AStart, ALength: Integer; AKind: TCodeTokenKind): TCodeToken;
-begin
+FUNCTION MakeToken(AStart, ALength: Integer; AKind: TCodeTokenKind): TCodeToken;
+BEGIN
   Result.Start := AStart;
   Result.Length := ALength;
   Result.Kind := AKind;
-end;
+END;
 
-function TokenArrayOf(const Token: TCodeToken): TCodeTokenArray;
-begin
+FUNCTION TokenArrayOf(CONST Token: TCodeToken): TCodeTokenArray;
+BEGIN
   SetLength(Result, 1);
   Result[0] := Token;
-end;
+END;
 
-function StartsTextAt(const ALine: string; Index: Integer; const Value: string;
+FUNCTION StartsTextAt(CONST ALine: STRING; Index: Integer; CONST Value: STRING;
   CaseSensitive: Boolean): Boolean;
-begin
-  if Value = '' then
+BEGIN
+  IF Value = '' THEN
     Exit(False);
 
-  if Index + Length(Value) - 1 > Length(ALine) then
+  IF Index + Length(Value) - 1 > Length(ALine) THEN
     Exit(False);
 
-  if CaseSensitive then
+  IF CaseSensitive THEN
     Result := Copy(ALine, Index, Length(Value)) = Value
-  else
+  ELSE
     Result := SameText(Copy(ALine, Index, Length(Value)), Value);
-end;
+END;
 
-constructor TCustomCodeHighlighter.Create(AOwner: TComponent);
-begin
-  inherited;
+CONSTRUCTOR TCustomCodeHighlighter.Create(AOwner: TComponent);
+BEGIN
+  INHERITED;
   SetDefaultStyles;
-end;
+END;
 
-class function TCustomCodeHighlighter.LanguageName: string;
-const
-  Suffixes: array[0..1] of string = ('CodeHighlighter', 'Highlighter');
-var
-  Suffix: string;
-begin
+CLASS FUNCTION TCustomCodeHighlighter.LanguageName: STRING;
+CONST
+  Suffixes          : ARRAY[0..1] OF STRING = ('CodeHighlighter', 'Highlighter');
+VAR
+  Suffix            : STRING;
+BEGIN
   Result := ClassName;
-  if (Result <> '') and (Result[1] = 'T') then
+  IF (Result <> '') AND (Result[1] = 'T') THEN
     Delete(Result, 1, 1);
-  for Suffix in Suffixes do
-    if EndsText(Suffix, Result) and (Length(Result) > Length(Suffix)) then
-    begin
+  FOR Suffix IN Suffixes DO
+    IF EndsText(Suffix, Result) AND (Length(Result) > Length(Suffix)) THEN BEGIN
       SetLength(Result, Length(Result) - Length(Suffix));
       Break;
-    end;
-end;
+    END;
+END;
 
-procedure TCustomCodeHighlighter.SetDefaultStyles;
-var
-  Kind: TCodeTokenKind;
-begin
-  for Kind := Low(TCodeTokenKind) to High(TCodeTokenKind) do
-  begin
+PROCEDURE TCustomCodeHighlighter.SetDefaultStyles;
+VAR
+  Kind              : TCodeTokenKind;
+BEGIN
+  FOR Kind := Low(TCodeTokenKind) TO High(TCodeTokenKind) DO BEGIN
     FStyles[Kind].Foreground := clWindowText;
     FStyles[Kind].Background := clNone;
     FStyles[Kind].FontStyle := [];
-  end;
+  END;
 
   FStyles[tkComment].Foreground := $00808080;
   FStyles[tkString].Foreground := $00008000;
@@ -261,344 +259,322 @@ begin
   FStyles[tkKeyword].Foreground := $00C04000;
   FStyles[tkKeyword].FontStyle := [fsBold];
   FStyles[tkSymbol].Foreground := $00606060;
-end;
+END;
 
-function TCustomCodeHighlighter.TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray;
-begin
+FUNCTION TCustomCodeHighlighter.TokenizeLine(CONST ALine: STRING; ALineIndex: Integer):
+  TCodeTokenArray;
+BEGIN
   Result := TokenArrayOf(MakeToken(1, Length(ALine), tkText));
-end;
+END;
 
-function TCustomCodeHighlighter.TokenizeLineState(const ALine: string; StartState: Integer;
-  out EndState: Integer): TCodeTokenArray;
-begin
+FUNCTION TCustomCodeHighlighter.TokenizeLineState(CONST ALine: STRING; StartState: Integer;
+  OUT EndState: Integer): TCodeTokenArray;
+BEGIN
   // Stateless default: highlighters that only override TokenizeLine keep working.
   EndState := 0;
   Result := TokenizeLine(ALine, 0);
-end;
+END;
 
-function TCustomCodeHighlighter.GetStyle(Kind: TCodeTokenKind): TCodeTextStyle;
-begin
+FUNCTION TCustomCodeHighlighter.GetStyle(Kind: TCodeTokenKind): TCodeTextStyle;
+BEGIN
   Result := FStyles[Kind];
-end;
+END;
 
-procedure TCustomCodeHighlighter.SetStyle(Kind: TCodeTokenKind; const Value: TCodeTextStyle);
-begin
+PROCEDURE TCustomCodeHighlighter.SetStyle(Kind: TCodeTokenKind; CONST Value: TCodeTextStyle);
+BEGIN
   FStyles[Kind] := Value;
-end;
+END;
 
-constructor TCustomWordCodeHighlighter.Create(AOwner: TComponent);
-begin
-  inherited;
-  FKeywords := TDictionary<string, Boolean>.Create;
+CONSTRUCTOR TCustomWordCodeHighlighter.Create(AOwner: TComponent);
+BEGIN
+  INHERITED;
+  FKeywords := TDictionary<STRING, Boolean>.Create;
   FMultiLineRanges := TList<TCodeMultiLineRange>.Create;
   BuildKeywords;
   BuildMultiLineRanges;
-end;
+END;
 
-destructor TCustomWordCodeHighlighter.Destroy;
-begin
+DESTRUCTOR TCustomWordCodeHighlighter.Destroy;
+BEGIN
   FMultiLineRanges.Free;
   FKeywords.Free;
-  inherited;
-end;
+  INHERITED;
+END;
 
-procedure TCustomWordCodeHighlighter.AddMultiLineRange(const AStartDelimiter, AEndDelimiter: string;
+PROCEDURE TCustomWordCodeHighlighter.AddMultiLineRange(CONST AStartDelimiter, AEndDelimiter: STRING;
   AKind: TCodeTokenKind);
-var
-  Range: TCodeMultiLineRange;
-begin
+VAR
+  Range             : TCodeMultiLineRange;
+BEGIN
   Range.StartDelimiter := AStartDelimiter;
   Range.EndDelimiter := AEndDelimiter;
   Range.Kind := AKind;
   FMultiLineRanges.Add(Range);
-end;
+END;
 
-procedure TCustomWordCodeHighlighter.BuildMultiLineRanges;
-begin
-end;
+PROCEDURE TCustomWordCodeHighlighter.BuildMultiLineRanges;
+BEGIN
+END;
 
-procedure TCustomWordCodeHighlighter.AddKeyword(const Value: string);
-begin
+PROCEDURE TCustomWordCodeHighlighter.AddKeyword(CONST Value: STRING);
+BEGIN
   FKeywords.AddOrSetValue(KeywordKey(Value), True);
-end;
+END;
 
-procedure TCustomWordCodeHighlighter.AddKeywords(const Values: array of string);
-var
-  Value: string;
-begin
-  for Value in Values do
+PROCEDURE TCustomWordCodeHighlighter.AddKeywords(CONST Values: ARRAY OF STRING);
+VAR
+  Value             : STRING;
+BEGIN
+  FOR Value IN Values DO
     AddKeyword(Value);
-end;
+END;
 
-procedure TCustomWordCodeHighlighter.BuildKeywords;
-begin
-end;
+PROCEDURE TCustomWordCodeHighlighter.BuildKeywords;
+BEGIN
+END;
 
-function TCustomWordCodeHighlighter.CaseSensitive: Boolean;
-begin
+FUNCTION TCustomWordCodeHighlighter.CaseSensitive: Boolean;
+BEGIN
   Result := False;
-end;
+END;
 
-function TCustomWordCodeHighlighter.KeywordKey(const Value: string): string;
-begin
-  if CaseSensitive then
+FUNCTION TCustomWordCodeHighlighter.KeywordKey(CONST Value: STRING): STRING;
+BEGIN
+  IF CaseSensitive THEN
     Result := Value
-  else
+  ELSE
     Result := LowerCase(Value);
-end;
+END;
 
-function TCustomWordCodeHighlighter.IsKeyword(const Value: string): Boolean;
-begin
+FUNCTION TCustomWordCodeHighlighter.IsKeyword(CONST Value: STRING): Boolean;
+BEGIN
   Result := FKeywords.ContainsKey(KeywordKey(Value));
-end;
+END;
 
-function TCustomWordCodeHighlighter.IsIdentifierStart(Ch: Char): Boolean;
-begin
-  Result := Ch.IsLetter or (Ch = '_');
-end;
+FUNCTION TCustomWordCodeHighlighter.IsIdentifierStart(Ch: Char): Boolean;
+BEGIN
+  Result := Ch.IsLetter OR (Ch = '_');
+END;
 
-function TCustomWordCodeHighlighter.IsIdentifierChar(Ch: Char): Boolean;
-begin
-  Result := Ch.IsLetterOrDigit or (Ch = '_');
-end;
+FUNCTION TCustomWordCodeHighlighter.IsIdentifierChar(Ch: Char): Boolean;
+BEGIN
+  Result := Ch.IsLetterOrDigit OR (Ch = '_');
+END;
 
-function TCustomWordCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TCustomWordCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := StartsTextAt(ALine, Index, '//', True);
-end;
+END;
 
-function TCustomWordCodeHighlighter.IsNumberStart(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TCustomWordCodeHighlighter.IsNumberStart(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := ALine[Index].IsDigit;
-end;
+END;
 
-function TCustomWordCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TCustomWordCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := Ch = '''';
-end;
+END;
 
-function TCustomWordCodeHighlighter.ReadIdentifier(const ALine: string; Index: Integer): Integer;
-begin
+FUNCTION TCustomWordCodeHighlighter.ReadIdentifier(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
   Result := Index;
-  repeat
+  REPEAT
     Inc(Result);
-  until (Result > Length(ALine)) or not IsIdentifierChar(ALine[Result]);
-end;
+  UNTIL (Result > Length(ALine)) OR NOT IsIdentifierChar(ALine[Result]);
+END;
 
-function TCustomWordCodeHighlighter.ReadNumber(const ALine: string; Index: Integer): Integer;
-begin
+FUNCTION TCustomWordCodeHighlighter.ReadNumber(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
   Result := Index;
-  repeat
+  REPEAT
     Inc(Result);
-  until (Result > Length(ALine)) or not (ALine[Result].IsLetterOrDigit or (ALine[Result] = '.') or
+  UNTIL (Result > Length(ALine)) OR NOT (ALine[Result].IsLetterOrDigit OR (ALine[Result] = '.') OR
     (ALine[Result] = '_'));
-end;
+END;
 
-function TCustomWordCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-begin
+FUNCTION TCustomWordCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+BEGIN
   Quote := ALine[Index];
   Result := Index + 1;
-  while Result <= Length(ALine) do
-  begin
-    if ALine[Result] = Quote then
-    begin
+  WHILE Result <= Length(ALine) DO BEGIN
+    IF ALine[Result] = Quote THEN BEGIN
       Inc(Result);
-      if (Result <= Length(ALine)) and (ALine[Result] = Quote) then
+      IF (Result <= Length(ALine)) AND (ALine[Result] = Quote) THEN
         Inc(Result)
-      else
+      ELSE
         Break;
-    end
-    else
+    END ELSE
       Inc(Result);
-  end;
-end;
+  END;
+END;
 
-function TCustomWordCodeHighlighter.TokenKindForIdentifier(const Value: string): TCodeTokenKind;
-begin
-  if IsKeyword(Value) then
+FUNCTION TCustomWordCodeHighlighter.TokenKindForIdentifier(CONST Value: STRING): TCodeTokenKind;
+BEGIN
+  IF IsKeyword(Value) THEN
     Result := tkKeyword
-  else
+  ELSE
     Result := tkIdentifier;
-end;
+END;
 
-function TCustomWordCodeHighlighter.TokenizeLine(const ALine: string; ALineIndex: Integer): TCodeTokenArray;
-var
-  EndState: Integer;
-begin
+FUNCTION TCustomWordCodeHighlighter.TokenizeLine(CONST ALine: STRING; ALineIndex: Integer):
+  TCodeTokenArray;
+VAR
+  EndState          : Integer;
+BEGIN
   Result := TokenizeLineState(ALine, 0, EndState);
-end;
+END;
 
-function TCustomWordCodeHighlighter.TokenizeLineState(const ALine: string; StartState: Integer;
-  out EndState: Integer): TCodeTokenArray;
-var
-  Tokens: TList<TCodeToken>;
-  I: Integer;
-  Start: Integer;
-  Text: string;
-  RangeIndex: Integer;
-  CloseAt: Integer;
-  Range: TCodeMultiLineRange;
+FUNCTION TCustomWordCodeHighlighter.TokenizeLineState(CONST ALine: STRING; StartState: Integer;
+  OUT EndState: Integer): TCodeTokenArray;
+VAR
+  Tokens            : TList<TCodeToken>;
+  I                 : Integer;
+  Start             : Integer;
+  Text              : STRING;
+  RangeIndex        : Integer;
+  CloseAt           : Integer;
+  Range             : TCodeMultiLineRange;
 
-  procedure AddToken(AStart, ALength: Integer; AKind: TCodeTokenKind);
-  begin
-    if ALength > 0 then
+  PROCEDURE AddToken(AStart, ALength: Integer; AKind: TCodeTokenKind);
+  BEGIN
+    IF ALength > 0 THEN
       Tokens.Add(MakeToken(AStart, ALength, AKind));
-  end;
+  END;
 
-  function TryRangeStart(Index: Integer; out FoundRange: Integer): Boolean;
-  var
-    R: Integer;
-  begin
-    for R := 0 to FMultiLineRanges.Count - 1 do
-      if StartsTextAt(ALine, Index, FMultiLineRanges[R].StartDelimiter, True) then
-      begin
+  FUNCTION TryRangeStart(Index: Integer; OUT FoundRange: Integer): Boolean;
+  VAR
+    R               : Integer;
+  BEGIN
+    FOR R := 0 TO FMultiLineRanges.Count - 1 DO
+      IF StartsTextAt(ALine, Index, FMultiLineRanges[R].StartDelimiter, True) THEN BEGIN
         FoundRange := R;
         Exit(True);
-      end;
+      END;
     FoundRange := -1;
     Result := False;
-  end;
+  END;
 
-begin
+BEGIN
   EndState := 0;
   Tokens := TList<TCodeToken>.Create;
-  try
+  TRY
     I := 1;
 
     // A multi-line construct left open by the previous line consumes this line
     // until its end delimiter (or to the end of the line, keeping the state).
-    if (StartState >= 1) and (StartState <= FMultiLineRanges.Count) then
-    begin
+    IF (StartState >= 1) AND (StartState <= FMultiLineRanges.Count) THEN BEGIN
       Range := FMultiLineRanges[StartState - 1];
       CloseAt := PosEx(Range.EndDelimiter, ALine, 1);
-      if CloseAt = 0 then
-      begin
+      IF CloseAt = 0 THEN BEGIN
         AddToken(1, Length(ALine), Range.Kind);
         EndState := StartState;
         I := Length(ALine) + 1;
-      end
-      else
-      begin
+      END ELSE BEGIN
         I := CloseAt + Length(Range.EndDelimiter);
         AddToken(1, I - 1, Range.Kind);
-      end;
-    end;
+      END;
+    END;
 
-    while I <= Length(ALine) do
-    begin
-      if ALine[I].IsWhiteSpace then
-      begin
+    WHILE I <= Length(ALine) DO BEGIN
+      IF ALine[I].IsWhiteSpace THEN BEGIN
         Start := I;
-        repeat
+        REPEAT
           Inc(I);
-        until (I > Length(ALine)) or not ALine[I].IsWhiteSpace;
+        UNTIL (I > Length(ALine)) OR NOT ALine[I].IsWhiteSpace;
         AddToken(Start, I - Start, tkWhitespace);
-      end
-      else if IsLineComment(ALine, I) then
-      begin
+      END ELSE IF IsLineComment(ALine, I) THEN BEGIN
         AddToken(I, Length(ALine) - I + 1, tkComment);
         Break;
-      end
-      else if TryRangeStart(I, RangeIndex) then
-      begin
+      END ELSE IF TryRangeStart(I, RangeIndex) THEN BEGIN
         Range := FMultiLineRanges[RangeIndex];
         Start := I;
         CloseAt := PosEx(Range.EndDelimiter, ALine, I + Length(Range.StartDelimiter));
-        if CloseAt = 0 then
-        begin
+        IF CloseAt = 0 THEN BEGIN
           AddToken(Start, Length(ALine) - Start + 1, Range.Kind);
           EndState := RangeIndex + 1;
           Break;
-        end;
+        END;
         I := CloseAt + Length(Range.EndDelimiter);
         AddToken(Start, I - Start, Range.Kind);
-      end
-      else if IsStringStart(ALine[I]) then
-      begin
+      END ELSE IF IsStringStart(ALine[I]) THEN BEGIN
         Start := I;
         I := ReadString(ALine, I);
         AddToken(Start, I - Start, tkString);
-      end
-      else if IsNumberStart(ALine, I) then
-      begin
+      END ELSE IF IsNumberStart(ALine, I) THEN BEGIN
         Start := I;
         I := ReadNumber(ALine, I);
         AddToken(Start, I - Start, tkNumber);
-      end
-      else if IsIdentifierStart(ALine[I]) then
-      begin
+      END ELSE IF IsIdentifierStart(ALine[I]) THEN BEGIN
         Start := I;
         I := ReadIdentifier(ALine, I);
         Text := Copy(ALine, Start, I - Start);
         AddToken(Start, I - Start, TokenKindForIdentifier(Text));
-      end
-      else
-      begin
+      END ELSE BEGIN
         AddToken(I, 1, tkSymbol);
         Inc(I);
-      end;
-    end;
+      END;
+    END;
 
     Result := Tokens.ToArray;
-  finally
+  FINALLY
     Tokens.Free;
-  end;
-end;
+  END;
+END;
 
-procedure TDelphiCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TDelphiCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'absolute', 'abstract', 'and', 'array', 'as', 'asm', 'begin', 'case',
-    'class', 'const', 'constructor', 'destructor', 'dispinterface', 'div',
-    'do', 'downto', 'else', 'end', 'except', 'exports', 'file', 'final',
-    'finalization', 'finally', 'for', 'function', 'goto', 'if',
-    'implementation', 'in', 'inherited', 'initialization', 'inline',
-    'interface', 'is', 'label', 'library', 'mod', 'nil', 'not', 'object',
-    'of', 'or', 'out', 'overload', 'override', 'packed', 'private',
-    'procedure', 'program', 'property', 'protected', 'public', 'published',
-    'raise', 'record', 'repeat', 'resourcestring', 'sealed', 'set', 'shl',
-    'shr', 'static', 'strict', 'string', 'then', 'threadvar', 'to', 'try',
-    'type', 'unit', 'unsafe', 'until', 'uses', 'var', 'virtual', 'while',
-    'with', 'xor', 'read', 'write', 'default', 'stored'
-  ]);
-end;
+      'absolute', 'abstract', 'and', 'array', 'as', 'asm', 'begin', 'case',
+      'class', 'const', 'constructor', 'destructor', 'dispinterface', 'div',
+      'do', 'downto', 'else', 'end', 'except', 'exports', 'file', 'final',
+      'finalization', 'finally', 'for', 'function', 'goto', 'if',
+      'implementation', 'in', 'inherited', 'initialization', 'inline',
+      'interface', 'is', 'label', 'library', 'mod', 'nil', 'not', 'object',
+      'of', 'or', 'out', 'overload', 'override', 'packed', 'private',
+      'procedure', 'program', 'property', 'protected', 'public', 'published',
+      'raise', 'record', 'repeat', 'resourcestring', 'sealed', 'set', 'shl',
+      'shr', 'static', 'strict', 'string', 'then', 'threadvar', 'to', 'try',
+      'type', 'unit', 'unsafe', 'until', 'uses', 'var', 'virtual', 'while',
+      'with', 'xor', 'read', 'write', 'default', 'stored'
+      ]);
+END;
 
-procedure TDelphiCodeHighlighter.BuildMultiLineRanges;
-begin
+PROCEDURE TDelphiCodeHighlighter.BuildMultiLineRanges;
+BEGIN
   AddMultiLineRange('(*', '*)');
   AddMultiLineRange('{', '}');
-end;
+END;
 
-function TDelphiCodeHighlighter.IsNumberStart(const ALine: string; Index: Integer): Boolean;
-begin
-  Result := inherited IsNumberStart(ALine, Index) or (ALine[Index] = '$');
-end;
+FUNCTION TDelphiCodeHighlighter.IsNumberStart(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
+  Result := INHERITED IsNumberStart(ALine, Index) OR (ALine[Index] = '$');
+END;
 
-function TDelphiCodeHighlighter.ReadNumber(const ALine: string; Index: Integer): Integer;
-begin
+FUNCTION TDelphiCodeHighlighter.ReadNumber(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
   Result := Index;
-  if ALine[Index] = '$' then
-  begin
-    repeat
+  IF ALine[Index] = '$' THEN BEGIN
+    REPEAT
       Inc(Result);
-    until (Result > Length(ALine)) or not (ALine[Result].IsDigit or CharInSet(UpCase(ALine[Result]), ['A'..'F']));
-  end
-  else
-    Result := inherited ReadNumber(ALine, Index);
-end;
+    UNTIL (Result > Length(ALine)) OR NOT (ALine[Result].IsDigit OR CharInSet(UpCase(ALine[Result]),
+      ['A'..'F']));
+  END ELSE
+    Result := INHERITED ReadNumber(ALine, Index);
+END;
 
-function TDelphiCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-begin
-  Result := inherited ReadString(ALine, Index);
-end;
+FUNCTION TDelphiCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
+  Result := INHERITED ReadString(ALine, Index);
+END;
 
-procedure TDelphiCodeHighlighter.SetDefaultStyles;
-var
-  Style: TCodeTextStyle;
-begin
-  inherited;
+PROCEDURE TDelphiCodeHighlighter.SetDefaultStyles;
+VAR
+  Style             : TCodeTextStyle;
+BEGIN
+  INHERITED;
   Style := Styles[tkKeyword];
   Style.Foreground := $00B06000;
   Styles[tkKeyword] := Style;
@@ -615,465 +591,441 @@ begin
   Style := Styles[tkNumber];
   Style.Foreground := $00800080;
   Styles[tkNumber] := Style;
-end;
+END;
 
-procedure TJavaScriptCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TJavaScriptCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'await', 'async', 'break', 'case', 'catch', 'class', 'const', 'continue',
-    'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends',
-    'false', 'finally', 'for', 'from', 'function', 'get', 'if', 'import',
-    'in', 'instanceof', 'let', 'new', 'null', 'of', 'return', 'set',
-    'static', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof',
-    'undefined', 'var', 'void', 'while', 'with', 'yield'
-  ]);
-end;
+      'await', 'async', 'break', 'case', 'catch', 'class', 'const', 'continue',
+      'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends',
+      'false', 'finally', 'for', 'from', 'function', 'get', 'if', 'import',
+      'in', 'instanceof', 'let', 'new', 'null', 'of', 'return', 'set',
+      'static', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof',
+      'undefined', 'var', 'void', 'while', 'with', 'yield'
+      ]);
+END;
 
-function TJavaScriptCodeHighlighter.CaseSensitive: Boolean;
-begin
+FUNCTION TJavaScriptCodeHighlighter.CaseSensitive: Boolean;
+BEGIN
   Result := True;
-end;
+END;
 
-procedure TJavaScriptCodeHighlighter.BuildMultiLineRanges;
-begin
+PROCEDURE TJavaScriptCodeHighlighter.BuildMultiLineRanges;
+BEGIN
   AddMultiLineRange('/*', '*/');
   // Template literals may span lines.
   AddMultiLineRange('`', '`', tkString);
-end;
+END;
 
-function TJavaScriptCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TJavaScriptCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := CharInSet(Ch, ['''', '"']);
-end;
+END;
 
-function TJavaScriptCodeHighlighter.ReadNumber(const ALine: string; Index: Integer): Integer;
-begin
+FUNCTION TJavaScriptCodeHighlighter.ReadNumber(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
   Result := Index;
-  repeat
+  REPEAT
     Inc(Result);
-  until (Result > Length(ALine)) or not (ALine[Result].IsLetterOrDigit or
+  UNTIL (Result > Length(ALine)) OR NOT (ALine[Result].IsLetterOrDigit OR
     CharInSet(ALine[Result], ['.', '_', 'x', 'X', 'b', 'B', 'o', 'O']));
-end;
+END;
 
-function TJavaScriptCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-  Escaped: Boolean;
-begin
+FUNCTION TJavaScriptCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+  Escaped           : Boolean;
+BEGIN
   Quote := ALine[Index];
   Escaped := False;
   Result := Index + 1;
-  while Result <= Length(ALine) do
-  begin
-    if Escaped then
+  WHILE Result <= Length(ALine) DO BEGIN
+    IF Escaped THEN
       Escaped := False
-    else if ALine[Result] = '\' then
+    ELSE IF ALine[Result] = '\' THEN
       Escaped := True
-    else if ALine[Result] = Quote then
-    begin
+    ELSE IF ALine[Result] = Quote THEN BEGIN
       Inc(Result);
       Break;
-    end;
+    END;
     Inc(Result);
-  end;
-end;
+  END;
+END;
 
-procedure TSqlCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TSqlCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'add', 'alter', 'and', 'as', 'asc', 'begin', 'between', 'by', 'case',
-    'cast', 'check', 'column', 'commit', 'constraint', 'create', 'cross',
-    'database', 'default', 'delete', 'desc', 'distinct', 'drop', 'else',
-    'end', 'except', 'exists', 'foreign', 'from', 'full', 'group', 'having',
-    'in', 'index', 'inner', 'insert', 'intersect', 'into', 'is', 'join',
-    'key', 'left', 'like', 'not', 'null', 'on', 'or', 'order', 'outer',
-    'primary', 'procedure', 'references', 'right', 'rollback', 'select',
-    'set', 'table', 'then', 'top', 'transaction', 'trigger', 'union',
-    'unique', 'update', 'values', 'view', 'when', 'where', 'with'
-  ]);
-end;
+      'add', 'alter', 'and', 'as', 'asc', 'begin', 'between', 'by', 'case',
+      'cast', 'check', 'column', 'commit', 'constraint', 'create', 'cross',
+      'database', 'default', 'delete', 'desc', 'distinct', 'drop', 'else',
+      'end', 'except', 'exists', 'foreign', 'from', 'full', 'group', 'having',
+      'in', 'index', 'inner', 'insert', 'intersect', 'into', 'is', 'join',
+      'key', 'left', 'like', 'not', 'null', 'on', 'or', 'order', 'outer',
+      'primary', 'procedure', 'references', 'right', 'rollback', 'select',
+      'set', 'table', 'then', 'top', 'transaction', 'trigger', 'union',
+      'unique', 'update', 'values', 'view', 'when', 'where', 'with'
+      ]);
+END;
 
-procedure TSqlCodeHighlighter.BuildMultiLineRanges;
-begin
+PROCEDURE TSqlCodeHighlighter.BuildMultiLineRanges;
+BEGIN
   AddMultiLineRange('/*', '*/');
-end;
+END;
 
-function TSqlCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TSqlCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := StartsTextAt(ALine, Index, '--', True);
-end;
+END;
 
-function TSqlCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TSqlCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := CharInSet(Ch, ['''', '"', '[']);
-end;
+END;
 
-function TSqlCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-begin
-  if ALine[Index] = '[' then
-  begin
+FUNCTION TSqlCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+BEGIN
+  IF ALine[Index] = '[' THEN BEGIN
     Result := Index + 1;
-    while (Result <= Length(ALine)) and (ALine[Result] <> ']') do
+    WHILE (Result <= Length(ALine)) AND (ALine[Result] <> ']') DO
       Inc(Result);
-    if Result <= Length(ALine) then
+    IF Result <= Length(ALine) THEN
       Inc(Result);
     Exit;
-  end;
+  END;
 
   Quote := ALine[Index];
   Result := Index + 1;
-  while Result <= Length(ALine) do
-  begin
-    if ALine[Result] = Quote then
-    begin
+  WHILE Result <= Length(ALine) DO BEGIN
+    IF ALine[Result] = Quote THEN BEGIN
       Inc(Result);
-      if (Result <= Length(ALine)) and (ALine[Result] = Quote) then
+      IF (Result <= Length(ALine)) AND (ALine[Result] = Quote) THEN
         Inc(Result)
-      else
+      ELSE
         Break;
-    end
-    else
+    END ELSE
       Inc(Result);
-  end;
-end;
+  END;
+END;
 
-procedure TTungliCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TTungliCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'if', 'then', 'else', 'while', 'do', 'procedure', 'exec', 'break',
-    'continue', 'exit', 'beep', 'end', 'and', 'or', 'not', 'div', 'mod',
-    'in', 'like', 'wildcard',
-    '_now', '_date', '_time', '_lf', '_tb', '_pi'
-  ]);
-end;
+      'if', 'then', 'else', 'while', 'do', 'procedure', 'exec', 'break',
+      'continue', 'exit', 'beep', 'end', 'and', 'or', 'not', 'div', 'mod',
+      'in', 'like', 'wildcard',
+      '_now', '_date', '_time', '_lf', '_tb', '_pi'
+      ]);
+END;
 
-procedure TTungliCodeHighlighter.BuildMultiLineRanges;
-begin
+PROCEDURE TTungliCodeHighlighter.BuildMultiLineRanges;
+BEGIN
   AddMultiLineRange('/*', '*/');
-end;
+END;
 
-function TTungliCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TTungliCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := False;
-end;
+END;
 
-function TTungliCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TTungliCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := Ch = '"';
-end;
+END;
 
-function TTungliCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-begin
+FUNCTION TTungliCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+BEGIN
   Quote := ALine[Index];
   Result := Index + 1;
-  while (Result <= Length(ALine)) and (ALine[Result] <> Quote) do
+  WHILE (Result <= Length(ALine)) AND (ALine[Result] <> Quote) DO
     Inc(Result);
-  if Result <= Length(ALine) then
+  IF Result <= Length(ALine) THEN
     Inc(Result);
-end;
+END;
 
-procedure TBatchCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TBatchCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'if', 'else', 'for', 'in', 'do', 'goto', 'call', 'exit', 'exist', 'not',
-    'defined', 'errorlevel', 'equ', 'neq', 'lss', 'leq', 'gtr', 'geq',
-    'echo', 'set', 'setlocal', 'endlocal', 'pause', 'start', 'shift',
-    'choice', 'rem', 'cls', 'title', 'color', 'prompt', 'pushd', 'popd',
-    'cd', 'chdir', 'md', 'mkdir', 'rd', 'rmdir', 'del', 'erase', 'copy',
-    'xcopy', 'move', 'ren', 'rename', 'type', 'find', 'findstr', 'sort',
-    'more', 'attrib', 'date', 'time', 'ver', 'vol', 'chcp', 'tasklist',
-    'taskkill', 'where', 'verify', 'assoc', 'ftype', 'enableextensions',
-    'enabledelayedexpansion', 'disableextensions', 'disabledelayedexpansion'
-  ]);
-end;
+      'if', 'else', 'for', 'in', 'do', 'goto', 'call', 'exit', 'exist', 'not',
+      'defined', 'errorlevel', 'equ', 'neq', 'lss', 'leq', 'gtr', 'geq',
+      'echo', 'set', 'setlocal', 'endlocal', 'pause', 'start', 'shift',
+      'choice', 'rem', 'cls', 'title', 'color', 'prompt', 'pushd', 'popd',
+      'cd', 'chdir', 'md', 'mkdir', 'rd', 'rmdir', 'del', 'erase', 'copy',
+      'xcopy', 'move', 'ren', 'rename', 'type', 'find', 'findstr', 'sort',
+      'more', 'attrib', 'date', 'time', 'ver', 'vol', 'chcp', 'tasklist',
+      'taskkill', 'where', 'verify', 'assoc', 'ftype', 'enableextensions',
+      'enabledelayedexpansion', 'disableextensions', 'disabledelayedexpansion'
+      ]);
+END;
 
-function TBatchCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-var
-  J: Integer;
-begin
-  if StartsTextAt(ALine, Index, '::', True) then
+FUNCTION TBatchCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+VAR
+  J                 : Integer;
+BEGIN
+  IF StartsTextAt(ALine, Index, '::', True) THEN
     Exit(True);
 
-  if not StartsTextAt(ALine, Index, 'rem', False) then
+  IF NOT StartsTextAt(ALine, Index, 'rem', False) THEN
     Exit(False);
 
   J := Index + 3;
-  if (J <= Length(ALine)) and IsIdentifierChar(ALine[J]) then
+  IF (J <= Length(ALine)) AND IsIdentifierChar(ALine[J]) THEN
     Exit(False);
 
-  for J := 1 to Index - 1 do
-    if not ALine[J].IsWhiteSpace then
+  FOR J := 1 TO Index - 1 DO
+    IF NOT ALine[J].IsWhiteSpace THEN
       Exit(False);
 
   Result := True;
-end;
+END;
 
-function TBatchCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TBatchCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := Ch = '"';
-end;
+END;
 
-function TBatchCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-begin
+FUNCTION TBatchCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
   Result := Index + 1;
-  while (Result <= Length(ALine)) and (ALine[Result] <> '"') do
+  WHILE (Result <= Length(ALine)) AND (ALine[Result] <> '"') DO
     Inc(Result);
-  if Result <= Length(ALine) then
+  IF Result <= Length(ALine) THEN
     Inc(Result);
-end;
+END;
 
-procedure TPowerShellCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TPowerShellCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'begin', 'break', 'catch', 'class', 'continue', 'data', 'define', 'do',
-    'dynamicparam', 'else', 'elseif', 'end', 'enum', 'exit', 'filter',
-    'finally', 'for', 'foreach', 'from', 'function', 'hidden', 'if', 'in',
-    'inlinescript', 'parallel', 'param', 'process', 'return', 'sequence',
-    'static', 'switch', 'throw', 'trap', 'try', 'until', 'using', 'var',
-    'while', 'workflow',
-    'true', 'false', 'null'
-  ]);
-end;
+      'begin', 'break', 'catch', 'class', 'continue', 'data', 'define', 'do',
+      'dynamicparam', 'else', 'elseif', 'end', 'enum', 'exit', 'filter',
+      'finally', 'for', 'foreach', 'from', 'function', 'hidden', 'if', 'in',
+      'inlinescript', 'parallel', 'param', 'process', 'return', 'sequence',
+      'static', 'switch', 'throw', 'trap', 'try', 'until', 'using', 'var',
+      'while', 'workflow',
+      'true', 'false', 'null'
+      ]);
+END;
 
-procedure TPowerShellCodeHighlighter.BuildMultiLineRanges;
-begin
+PROCEDURE TPowerShellCodeHighlighter.BuildMultiLineRanges;
+BEGIN
   AddMultiLineRange('<#', '#>');
-end;
+END;
 
-function TPowerShellCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TPowerShellCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := StartsTextAt(ALine, Index, '#', True);
-end;
+END;
 
-function TPowerShellCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TPowerShellCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := CharInSet(Ch, ['''', '"']);
-end;
+END;
 
-function TPowerShellCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-  Escaped: Boolean;
-begin
+FUNCTION TPowerShellCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+  Escaped           : Boolean;
+BEGIN
   Quote := ALine[Index];
   Result := Index + 1;
-  if Quote = '"' then
-  begin
+  IF Quote = '"' THEN BEGIN
     Escaped := False;
-    while Result <= Length(ALine) do
-    begin
-      if Escaped then
+    WHILE Result <= Length(ALine) DO BEGIN
+      IF Escaped THEN
         Escaped := False
-      else if ALine[Result] = '`' then
+      ELSE IF ALine[Result] = '`' THEN
         Escaped := True
-      else if ALine[Result] = Quote then
-      begin
+      ELSE IF ALine[Result] = Quote THEN BEGIN
         Inc(Result);
         Break;
-      end;
+      END;
       Inc(Result);
-    end;
-  end
-  else
-  begin
-    while Result <= Length(ALine) do
-    begin
-      if ALine[Result] = Quote then
-      begin
+    END;
+  END ELSE BEGIN
+    WHILE Result <= Length(ALine) DO BEGIN
+      IF ALine[Result] = Quote THEN BEGIN
         Inc(Result);
-        if (Result <= Length(ALine)) and (ALine[Result] = Quote) then
+        IF (Result <= Length(ALine)) AND (ALine[Result] = Quote) THEN
           Inc(Result)
-        else
+        ELSE
           Break;
-      end
-      else
+      END ELSE
         Inc(Result);
-    end;
-  end;
-end;
+    END;
+  END;
+END;
 
-procedure TIniCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TIniCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'true', 'false', 'yes', 'no', 'on', 'off', 'null'
-  ]);
-end;
+      'true', 'false', 'yes', 'no', 'on', 'off', 'null'
+      ]);
+END;
 
-function TIniCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
-  Result := StartsTextAt(ALine, Index, ';', True) or
-            StartsTextAt(ALine, Index, '#', True);
-end;
+FUNCTION TIniCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
+  Result := StartsTextAt(ALine, Index, ';', True) OR
+    StartsTextAt(ALine, Index, '#', True);
+END;
 
-function TIniCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TIniCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := CharInSet(Ch, ['''', '"', '[']);
-end;
+END;
 
-function TIniCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-begin
-  if ALine[Index] = '[' then
-  begin
+FUNCTION TIniCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+BEGIN
+  IF ALine[Index] = '[' THEN BEGIN
     Result := Index + 1;
-    while (Result <= Length(ALine)) and (ALine[Result] <> ']') do
+    WHILE (Result <= Length(ALine)) AND (ALine[Result] <> ']') DO
       Inc(Result);
-    if Result <= Length(ALine) then
+    IF Result <= Length(ALine) THEN
       Inc(Result);
     Exit;
-  end;
+  END;
 
   Quote := ALine[Index];
   Result := Index + 1;
-  while (Result <= Length(ALine)) and (ALine[Result] <> Quote) do
+  WHILE (Result <= Length(ALine)) AND (ALine[Result] <> Quote) DO
     Inc(Result);
-  if Result <= Length(ALine) then
+  IF Result <= Length(ALine) THEN
     Inc(Result);
-end;
+END;
 
-procedure TYamlCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TYamlCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'true', 'false', 'yes', 'no', 'on', 'off', 'null'
-  ]);
-end;
+      'true', 'false', 'yes', 'no', 'on', 'off', 'null'
+      ]);
+END;
 
-function TYamlCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TYamlCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := StartsTextAt(ALine, Index, '#', True);
-end;
+END;
 
-function TYamlCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TYamlCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := CharInSet(Ch, ['''', '"']);
-end;
+END;
 
-function TYamlCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-  Escaped: Boolean;
-begin
+FUNCTION TYamlCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+  Escaped           : Boolean;
+BEGIN
   Quote := ALine[Index];
   Result := Index + 1;
-  if Quote = '"' then
-  begin
+  IF Quote = '"' THEN BEGIN
     Escaped := False;
-    while Result <= Length(ALine) do
-    begin
-      if Escaped then
+    WHILE Result <= Length(ALine) DO BEGIN
+      IF Escaped THEN
         Escaped := False
-      else if ALine[Result] = '\' then
+      ELSE IF ALine[Result] = '\' THEN
         Escaped := True
-      else if ALine[Result] = Quote then
-      begin
+      ELSE IF ALine[Result] = Quote THEN BEGIN
         Inc(Result);
         Break;
-      end;
+      END;
       Inc(Result);
-    end;
-  end
-  else
-  begin
-    while Result <= Length(ALine) do
-    begin
-      if ALine[Result] = Quote then
-      begin
+    END;
+  END ELSE BEGIN
+    WHILE Result <= Length(ALine) DO BEGIN
+      IF ALine[Result] = Quote THEN BEGIN
         Inc(Result);
-        if (Result <= Length(ALine)) and (ALine[Result] = Quote) then
+        IF (Result <= Length(ALine)) AND (ALine[Result] = Quote) THEN
           Inc(Result)
-        else
+        ELSE
           Break;
-      end
-      else
+      END ELSE
         Inc(Result);
-    end;
-  end;
-end;
+    END;
+  END;
+END;
 
-procedure TPythonCodeHighlighter.BuildKeywords;
-begin
+PROCEDURE TPythonCodeHighlighter.BuildKeywords;
+BEGIN
   AddKeywords([
-    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
-    'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
-    'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
-    'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try',
-    'while', 'with', 'yield', 'match', 'case'
-  ]);
-end;
+      'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+      'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+      'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+      'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try',
+      'while', 'with', 'yield', 'match', 'case'
+      ]);
+END;
 
-procedure TPythonCodeHighlighter.BuildMultiLineRanges;
-begin
+PROCEDURE TPythonCodeHighlighter.BuildMultiLineRanges;
+BEGIN
   AddMultiLineRange('"""', '"""', tkString);
   AddMultiLineRange('''''''', '''''''', tkString);
-end;
+END;
 
-function TPythonCodeHighlighter.CaseSensitive: Boolean;
-begin
+FUNCTION TPythonCodeHighlighter.CaseSensitive: Boolean;
+BEGIN
   Result := True;
-end;
+END;
 
-function TPythonCodeHighlighter.IsLineComment(const ALine: string; Index: Integer): Boolean;
-begin
+FUNCTION TPythonCodeHighlighter.IsLineComment(CONST ALine: STRING; Index: Integer): Boolean;
+BEGIN
   Result := StartsTextAt(ALine, Index, '#', True);
-end;
+END;
 
-function TPythonCodeHighlighter.IsStringStart(Ch: Char): Boolean;
-begin
+FUNCTION TPythonCodeHighlighter.IsStringStart(Ch: Char): Boolean;
+BEGIN
   Result := CharInSet(Ch, ['''', '"']);
-end;
+END;
 
-function TPythonCodeHighlighter.ReadNumber(const ALine: string; Index: Integer): Integer;
-begin
+FUNCTION TPythonCodeHighlighter.ReadNumber(CONST ALine: STRING; Index: Integer): Integer;
+BEGIN
   Result := Index;
-  repeat
+  REPEAT
     Inc(Result);
-  until (Result > Length(ALine)) or not (ALine[Result].IsLetterOrDigit or
+  UNTIL (Result > Length(ALine)) OR NOT (ALine[Result].IsLetterOrDigit OR
     CharInSet(ALine[Result], ['.', '_']));
-end;
+END;
 
-function TPythonCodeHighlighter.ReadString(const ALine: string; Index: Integer): Integer;
-var
-  Quote: Char;
-  Escaped: Boolean;
-begin
+FUNCTION TPythonCodeHighlighter.ReadString(CONST ALine: STRING; Index: Integer): Integer;
+VAR
+  Quote             : Char;
+  Escaped           : Boolean;
+BEGIN
   // Triple-quoted strings are handled by the multi-line ranges; this only
   // sees single-quoted forms.
   Quote := ALine[Index];
   Escaped := False;
   Result := Index + 1;
-  while Result <= Length(ALine) do
-  begin
-    if Escaped then
+  WHILE Result <= Length(ALine) DO BEGIN
+    IF Escaped THEN
       Escaped := False
-    else if ALine[Result] = '\' then
+    ELSE IF ALine[Result] = '\' THEN
       Escaped := True
-    else if ALine[Result] = Quote then
-    begin
+    ELSE IF ALine[Result] = Quote THEN BEGIN
       Inc(Result);
       Break;
-    end;
+    END;
     Inc(Result);
-  end;
-end;
+  END;
+END;
 
-class function TSqlCodeHighlighter.LanguageName: string;
-begin
+CLASS FUNCTION TSqlCodeHighlighter.LanguageName: STRING;
+BEGIN
   Result := 'SQL';
-end;
+END;
 
-class function TIniCodeHighlighter.LanguageName: string;
-begin
+CLASS FUNCTION TIniCodeHighlighter.LanguageName: STRING;
+BEGIN
   Result := 'INI';
-end;
+END;
 
-class function TYamlCodeHighlighter.LanguageName: string;
-begin
+CLASS FUNCTION TYamlCodeHighlighter.LanguageName: STRING;
+BEGIN
   Result := 'YAML';
-end;
+END;
 
-end.
+END.
+

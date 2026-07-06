@@ -82,9 +82,39 @@ At design time the same dialog is registered as the component editor for
 `TCodeTemplateProvider`: double-click the component (or choose
 "Edit Templates...") and the changes stream into the DFM.
 
+## User templates on top of built-in ones
+
+The provider holds two layers:
+
+- `Templates` — the application's built-in set (hard-coded or streamed from
+  the DFM). Ships with the app; updated by the app.
+- `UserTemplates` — the end user's own additions, persisted as JSON in
+  `UserFileName`.
+
+`GetTemplates` (and therefore the Ctrl+J popup) merges both. A user template
+with the same name **hides** the built-in one, so users can customise shipped
+templates too. Typical wiring:
+
+```pascal
+AddHardCodedTemplates(TemplateProvider1);                       // built-in layer
+TemplateProvider1.UserFileName := AppDataDir + 'templates.json';
+TemplateProvider1.LoadUserTemplates;   // quiet no-op when the file is missing
+```
+
+`TCodeTemplateEditorDialog.Execute(AProvider)` edits the user layer: built-in
+templates are listed read-only for reference, Duplicate turns one into an
+editable user copy (keeping its name, i.e. an override), and on OK the user
+layer is written back — and saved to `UserFileName` automatically when it is
+set. Nothing else is needed in the app.
+
+`Execute(ATemplates: TCodeTemplates)` still edits a single collection
+in-place, for apps that want to manage one flat set themselves.
+
 ## Persistence
 
-`TCodeTemplateProvider` saves and loads a simple JSON document:
+Both `TCodeTemplates` and the provider save and load a simple JSON document
+(the provider-level methods operate on the built-in `Templates` layer;
+`LoadUserTemplates` / `SaveUserTemplates` handle the user layer):
 
 ```pascal
 TemplateProvider1.LoadFromFile(AppDataDir + 'templates.json');
@@ -104,7 +134,4 @@ TemplateProvider1.SaveToFile(AppDataDir + 'templates.json');
 }
 ```
 
-`LoadFromStream` / `SaveToStream` are available for other storage. Templates
-declared in the DFM and a user file can be combined by loading the file into a
-second provider and `Assign`-ing, or simply by treating the file as the single
-source of truth.
+`LoadFromStream` / `SaveToStream` are available for other storage.

@@ -1,12 +1,12 @@
-unit CodeEdit.Completion;
+UNIT CodeEdit.Completion;
 
-interface
+INTERFACE
 
-uses
+USES
   System.Classes,
   System.Generics.Collections;
 
-type
+TYPE
   TCodeCompletionItemKind = (
     ckText,
     ckKeyword,
@@ -20,197 +20,207 @@ type
     ckColumn,
     ckSnippet,
     ckParameter
-  );
+    );
 
-  TCodeCompletionContext = record
+  TCodeCompletionContext = RECORD
     Line: Integer;
     Column: Integer;
-    Prefix: string;
+    Prefix: STRING;
     TriggerChar: Char;
-    LineText: string;
+    LineText: STRING;
     ExplicitRequest: Boolean;
-  end;
+  END;
 
-  TCodeSignatureHelpContext = record
+  TCodeSignatureHelpContext = RECORD
     Line: Integer;
     Column: Integer;
-    LineText: string;
-    FunctionName: string;
+    LineText: STRING;
+    FunctionName: STRING;
     TriggerChar: Char;
     ActiveParameter: Integer;
     ExplicitRequest: Boolean;
-  end;
+  END;
 
-  TCodeCompletionItem = class
-  private
-    FCaption: string;
-    FDetail: string;
-    FInsertText: string;
+  TCodeCompletionItem = CLASS
+  PRIVATE
+    FCaption: STRING;
+    FDetail: STRING;
+    FInsertText: STRING;
     FKind: TCodeCompletionItemKind;
-  public
-    constructor Create(const ACaption, AInsertText: string; AKind: TCodeCompletionItemKind = ckText;
-      const ADetail: string = '');
-    property Caption: string read FCaption write FCaption;
-    property InsertText: string read FInsertText write FInsertText;
-    property Detail: string read FDetail write FDetail;
-    property Kind: TCodeCompletionItemKind read FKind write FKind;
-  end;
+  PUBLIC
+    CONSTRUCTOR Create(CONST ACaption, AInsertText: STRING; AKind: TCodeCompletionItemKind = ckText;
+      CONST ADetail: STRING = '');
+    PROPERTY Caption: STRING READ FCaption WRITE FCaption;
+    PROPERTY InsertText: STRING READ FInsertText WRITE FInsertText;
+    PROPERTY Detail: STRING READ FDetail WRITE FDetail;
+    PROPERTY Kind: TCodeCompletionItemKind READ FKind WRITE FKind;
+  END;
 
-  TCodeCompletionItems = class(TObjectList<TCodeCompletionItem>)
-  public
-    procedure AddItem(const ACaption, AInsertText: string; AKind: TCodeCompletionItemKind = ckText;
-      const ADetail: string = '');
-  end;
+  TCodeCompletionItems = CLASS(TObjectList<TCodeCompletionItem>)
+  PUBLIC
+    PROCEDURE AddItem(CONST ACaption, AInsertText: STRING; AKind: TCodeCompletionItemKind = ckText;
+      CONST ADetail: STRING = '');
+  END;
 
-  TCodeSignatureItem = class
-  private
-    FDetail: string;
-    FName: string;
+  TCodeSignatureItem = CLASS
+  PRIVATE
+    FDetail: STRING;
+    FName: STRING;
     FParameters: TStringList;
-    function GetParameters: TStrings;
-  public
-    constructor Create(const AName: string; const AParameters: array of string; const ADetail: string = '');
-    destructor Destroy; override;
-    property Detail: string read FDetail write FDetail;
-    property Name: string read FName write FName;
-    property Parameters: TStrings read GetParameters;
-  end;
+    FUNCTION GetParameters: TStrings;
+  PUBLIC
+    CONSTRUCTOR Create(CONST AName: STRING; CONST AParameters: ARRAY OF STRING; CONST ADetail: STRING
+      = '');
+    DESTRUCTOR Destroy; OVERRIDE;
+    PROPERTY Detail: STRING READ FDetail WRITE FDetail;
+    PROPERTY Name: STRING READ FName WRITE FName;
+    PROPERTY Parameters: TStrings READ GetParameters;
+  END;
 
-  TCodeSignatureItems = class(TObjectList<TCodeSignatureItem>)
-  public
-    procedure AddItem(const AName: string; const AParameters: array of string; const ADetail: string = '');
-  end;
+  TCodeSignatureItems = CLASS(TObjectList<TCodeSignatureItem>)
+  PUBLIC
+    PROCEDURE AddItem(CONST AName: STRING; CONST AParameters: ARRAY OF STRING; CONST ADetail: STRING
+      = '');
+  END;
 
-  TCodeCompletionEvent = procedure(Sender: TObject; const Context: TCodeCompletionContext;
-    Items: TCodeCompletionItems) of object;
-  TCodeSignatureHelpEvent = procedure(Sender: TObject; const Context: TCodeSignatureHelpContext;
-    Items: TCodeSignatureItems) of object;
+  TCodeCompletionEvent = PROCEDURE(Sender: TObject; CONST Context: TCodeCompletionContext;
+    Items: TCodeCompletionItems) OF OBJECT;
+  TCodeSignatureHelpEvent = PROCEDURE(Sender: TObject; CONST Context: TCodeSignatureHelpContext;
+    Items: TCodeSignatureItems) OF OBJECT;
 
-  TCustomCodeCompletionProvider = class(TComponent)
-  private
+  TCustomCodeCompletionProvider = CLASS(TComponent)
+  PRIVATE
     FOnGetCompletions: TCodeCompletionEvent;
     FOnGetSignatureHelp: TCodeSignatureHelpEvent;
-  public
-    procedure GetCompletions(const Context: TCodeCompletionContext; Items: TCodeCompletionItems); virtual;
-    procedure GetSignatureHelp(const Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems); virtual;
-  published
-    property OnGetCompletions: TCodeCompletionEvent read FOnGetCompletions write FOnGetCompletions;
-    property OnGetSignatureHelp: TCodeSignatureHelpEvent read FOnGetSignatureHelp write FOnGetSignatureHelp;
-  end;
+  PUBLIC
+    PROCEDURE GetCompletions(CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
+      VIRTUAL;
+    PROCEDURE GetSignatureHelp(CONST Context: TCodeSignatureHelpContext; Items:
+      TCodeSignatureItems);
+      VIRTUAL;
+  PUBLISHED
+    PROPERTY OnGetCompletions: TCodeCompletionEvent READ FOnGetCompletions WRITE FOnGetCompletions;
+    PROPERTY OnGetSignatureHelp: TCodeSignatureHelpEvent READ FOnGetSignatureHelp WRITE
+      FOnGetSignatureHelp;
+  END;
 
-  TKeywordCompletionProvider = class(TCustomCodeCompletionProvider)
-  private
+  TKeywordCompletionProvider = CLASS(TCustomCodeCompletionProvider)
+  PRIVATE
     FKeywords: TStringList;
-    function GetKeywords: TStrings;
-    procedure SetKeywords(Value: TStrings);
-  public
-    constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
-    procedure GetCompletions(const Context: TCodeCompletionContext; Items: TCodeCompletionItems); override;
-  published
-    property Keywords: TStrings read GetKeywords write SetKeywords;
-  end;
+    FUNCTION GetKeywords: TStrings;
+    PROCEDURE SetKeywords(Value: TStrings);
+  PUBLIC
+    CONSTRUCTOR Create(AOwner: TComponent); OVERRIDE;
+    DESTRUCTOR Destroy; OVERRIDE;
+    PROCEDURE GetCompletions(CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
+      OVERRIDE;
+  PUBLISHED
+    PROPERTY Keywords: TStrings READ GetKeywords WRITE SetKeywords;
+  END;
 
-implementation
+IMPLEMENTATION
 
-uses
+USES
   System.StrUtils,
   System.SysUtils;
 
-constructor TCodeCompletionItem.Create(const ACaption, AInsertText: string; AKind: TCodeCompletionItemKind;
-  const ADetail: string);
-begin
-  inherited Create;
+CONSTRUCTOR TCodeCompletionItem.Create(CONST ACaption, AInsertText: STRING; AKind:
+  TCodeCompletionItemKind;
+  CONST ADetail: STRING);
+BEGIN
+  INHERITED Create;
   FCaption := ACaption;
   FInsertText := AInsertText;
   FKind := AKind;
   FDetail := ADetail;
-end;
+END;
 
-procedure TCodeCompletionItems.AddItem(const ACaption, AInsertText: string; AKind: TCodeCompletionItemKind;
-  const ADetail: string);
-begin
+PROCEDURE TCodeCompletionItems.AddItem(CONST ACaption, AInsertText: STRING; AKind:
+  TCodeCompletionItemKind;
+  CONST ADetail: STRING);
+BEGIN
   Add(TCodeCompletionItem.Create(ACaption, AInsertText, AKind, ADetail));
-end;
+END;
 
-constructor TCodeSignatureItem.Create(const AName: string; const AParameters: array of string;
-  const ADetail: string);
-var
-  Parameter: string;
-begin
-  inherited Create;
+CONSTRUCTOR TCodeSignatureItem.Create(CONST AName: STRING; CONST AParameters: ARRAY OF STRING;
+  CONST ADetail: STRING);
+VAR
+  Parameter         : STRING;
+BEGIN
+  INHERITED Create;
   FName := AName;
   FDetail := ADetail;
   FParameters := TStringList.Create;
-  for Parameter in AParameters do
+  FOR Parameter IN AParameters DO
     FParameters.Add(Parameter);
-end;
+END;
 
-destructor TCodeSignatureItem.Destroy;
-begin
+DESTRUCTOR TCodeSignatureItem.Destroy;
+BEGIN
   FParameters.Free;
-  inherited;
-end;
+  INHERITED;
+END;
 
-function TCodeSignatureItem.GetParameters: TStrings;
-begin
+FUNCTION TCodeSignatureItem.GetParameters: TStrings;
+BEGIN
   Result := FParameters;
-end;
+END;
 
-procedure TCodeSignatureItems.AddItem(const AName: string; const AParameters: array of string;
-  const ADetail: string);
-begin
+PROCEDURE TCodeSignatureItems.AddItem(CONST AName: STRING; CONST AParameters: ARRAY OF STRING;
+  CONST ADetail: STRING);
+BEGIN
   Add(TCodeSignatureItem.Create(AName, AParameters, ADetail));
-end;
+END;
 
-procedure TCustomCodeCompletionProvider.GetCompletions(const Context: TCodeCompletionContext;
+PROCEDURE TCustomCodeCompletionProvider.GetCompletions(CONST Context: TCodeCompletionContext;
   Items: TCodeCompletionItems);
-begin
-  if Assigned(FOnGetCompletions) then
+BEGIN
+  IF Assigned(FOnGetCompletions) THEN
     FOnGetCompletions(Self, Context, Items);
-end;
+END;
 
-procedure TCustomCodeCompletionProvider.GetSignatureHelp(const Context: TCodeSignatureHelpContext;
+PROCEDURE TCustomCodeCompletionProvider.GetSignatureHelp(CONST Context: TCodeSignatureHelpContext;
   Items: TCodeSignatureItems);
-begin
-  if Assigned(FOnGetSignatureHelp) then
+BEGIN
+  IF Assigned(FOnGetSignatureHelp) THEN
     FOnGetSignatureHelp(Self, Context, Items);
-end;
+END;
 
-constructor TKeywordCompletionProvider.Create(AOwner: TComponent);
-begin
-  inherited;
+CONSTRUCTOR TKeywordCompletionProvider.Create(AOwner: TComponent);
+BEGIN
+  INHERITED;
   FKeywords := TStringList.Create;
   FKeywords.CaseSensitive := False;
   FKeywords.Sorted := True;
   FKeywords.Duplicates := dupIgnore;
-end;
+END;
 
-destructor TKeywordCompletionProvider.Destroy;
-begin
+DESTRUCTOR TKeywordCompletionProvider.Destroy;
+BEGIN
   FKeywords.Free;
-  inherited;
-end;
+  INHERITED;
+END;
 
-procedure TKeywordCompletionProvider.SetKeywords(Value: TStrings);
-begin
+PROCEDURE TKeywordCompletionProvider.SetKeywords(Value: TStrings);
+BEGIN
   FKeywords.Assign(Value);
-end;
+END;
 
-function TKeywordCompletionProvider.GetKeywords: TStrings;
-begin
+FUNCTION TKeywordCompletionProvider.GetKeywords: TStrings;
+BEGIN
   Result := FKeywords;
-end;
+END;
 
-procedure TKeywordCompletionProvider.GetCompletions(const Context: TCodeCompletionContext;
+PROCEDURE TKeywordCompletionProvider.GetCompletions(CONST Context: TCodeCompletionContext;
   Items: TCodeCompletionItems);
-var
-  Keyword: string;
-begin
-  inherited;
-  for Keyword in FKeywords do
-    if (Context.Prefix = '') or StartsText(Context.Prefix, Keyword) then
+VAR
+  Keyword           : STRING;
+BEGIN
+  INHERITED;
+  FOR Keyword IN FKeywords DO
+    IF (Context.Prefix = '') OR StartsText(Context.Prefix, Keyword) THEN
       Items.AddItem(Keyword, Keyword, ckKeyword);
-end;
+END;
 
-end.
+END.
+

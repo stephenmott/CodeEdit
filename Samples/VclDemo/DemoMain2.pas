@@ -507,6 +507,10 @@ BEGIN
 
   FTemplateProvider := TCodeTemplateProvider.Create(Self);
   AddSampleTemplates;
+  // The user's own templates live next to the exe and layer on top of the
+  // hard-coded set; the template dialog saves them back automatically.
+  FTemplateProvider.UserFileName := ChangeFileExt(ParamStr(0), '.templates.json');
+  FTemplateProvider.LoadUserTemplates;
 
   CodeEditor1.Highlighter := DelphiCodeHighlighter1;
   CodeEditor1.Lines.Text := cDelphi;
