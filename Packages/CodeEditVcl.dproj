@@ -8,7 +8,7 @@
         <TargetedPlatforms>1048577</TargetedPlatforms>
         <AppType>Package</AppType>
         <FrameworkType>VCL</FrameworkType>
-        <ProjectVersion>20.3</ProjectVersion>
+        <ProjectVersion>20.4</ProjectVersion>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
@@ -100,6 +100,15 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
+        <DCCReference Include="rtl.dcp"/>
+        <DCCReference Include="vcl.dcp"/>
+        <DCCReference Include="designide.dcp"/>
+        <DCCReference Include="..\Source\CodeEdit.Completion.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.Editor.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.Highlighter.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.Templates.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.TemplateEditorDlg.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.Register.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
