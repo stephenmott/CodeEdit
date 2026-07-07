@@ -6,6 +6,13 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- `OnGetHint` event: hover-to-evaluate. After the mouse rests over an
+  identifier the editor fires `OnGetHint(Line, Column, AWord, var HintText)`
+  (1-based position; `AWord` is the identifier, including dotted `a.b.c`
+  member chains) and, if the handler sets `HintText`, shows a tooltip — e.g. a
+  debugger's live variable value. The hint clears on move/scroll/keypress.
+  Assigning the event enables mouse tracking; it is the CodeEdit equivalent of
+  eControl's `OnGetTokenHint`.
 - `OnQueryExecutableLine` event: a pull-based per-line gutter hook (1-based
   `Line`, `var Value: Boolean`) the editor calls while painting each visible
   line, drawing a blue "executable line" dot when the handler returns True —

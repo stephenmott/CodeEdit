@@ -126,6 +126,8 @@ and toolbars: `eccUndo`, `eccRedo`, `eccCut`, `eccCopy`, `eccPaste`,
 | `OnBreakpointsChanged` | User or code toggled breakpoints (not during streaming). |
 | `OnResolveTheme(Sender, Colors)` | Each paint, after the base palette is resolved — override individual colors here. |
 | `OnZoomChanged` | The `Zoom` percentage changed (keyboard, wheel, or code). |
+| `OnQueryExecutableLine(Sender, Line, var Value)` | Per visible line while painting the gutter; set `Value` to show a blue executable-line dot. See [debugger surface](breakpoints-markers.md). |
+| `OnGetHint(Sender, Line, Column, AWord, var HintText)` | Mouse rested over an identifier; set `HintText` for a hover tooltip (e.g. a live value). See [debugger surface](breakpoints-markers.md). |
 
 ## Keyboard reference
 

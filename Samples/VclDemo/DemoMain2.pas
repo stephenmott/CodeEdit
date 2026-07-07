@@ -315,6 +315,8 @@ TYPE
       CONST Context: TCodeSignatureHelpContext; Items: TCodeSignatureItems);
     PROCEDURE CodeEditor1QueryExecutableLine(Sender: TObject; Line: Integer;
       VAR Value: Boolean);
+    PROCEDURE CodeEditor1GetHint(Sender: TObject; Line, Column: Integer;
+      CONST AWord: STRING; VAR HintText: STRING);
   PRIVATE
     { Private declarations }
     FCompletionProvider: TCustomCodeCompletionProvider;
@@ -528,8 +530,17 @@ BEGIN
   // Blue "executable line" dots: a debugger would ask its script engine here;
   // the demo just marks non-blank, non-comment lines.
   CodeEditor1.OnQueryExecutableLine := CodeEditor1QueryExecutableLine;
+  // Hover-to-evaluate: a debugger returns the variable's live value here; the
+  // demo just echoes the identifier under the mouse.
+  CodeEditor1.OnGetHint := CodeEditor1GetHint;
 
   ComboBox1.ItemIndex := 0;
+END;
+
+PROCEDURE TForm2.CodeEditor1GetHint(Sender: TObject; Line, Column: Integer;
+  CONST AWord: STRING; VAR HintText: STRING);
+BEGIN
+  HintText := Format('%s = <value>   (%d:%d)', [AWord, Line, Column]);
 END;
 
 PROCEDURE TForm2.CodeEditor1QueryExecutableLine(Sender: TObject; Line: Integer;

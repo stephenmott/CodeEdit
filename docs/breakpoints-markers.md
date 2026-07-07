@@ -80,6 +80,30 @@ This replaces the pull-based per-line gutter callbacks (`OnCheckLine`) that
 eControl's `TSyntaxMemo` used. For a *single* highlighted statement, prefer
 `ExecutionLine` or an `lmkExecutable` line marker below.
 
+## Hover-to-evaluate (`OnGetHint`)
+
+While paused at a breakpoint, debuggers show a variable's live value when you
+hover over it. The editor fires `OnGetHint` after the mouse rests over an
+identifier; return the value in `HintText` and it pops a tooltip:
+
+```pascal
+CodeEditor1.OnGetHint := EditorGetHint;
+
+procedure TForm1.EditorGetHint(Sender: TObject; Line, Column: Integer;
+  const AWord: string; var HintText: string);
+begin
+  if Debugging then
+    HintText := Interpreter.Evaluate(AWord);   // '' = no tooltip
+end;
+```
+
+`Line` / `Column` are 1-based. `AWord` is the identifier under the mouse, with
+a leading dotted member chain folded in (hovering `total` in `order.total`
+gives `order.total`), so it drops straight into an expression evaluator. The
+hint is dismissed automatically on mouse move, scroll, key press, or focus
+loss. Assigning the event turns on mouse tracking; leave it `nil` to disable.
+This is the CodeEdit equivalent of eControl's `OnGetTokenHint`.
+
 ## Line markers
 
 For compiler/debugger annotations beyond breakpoints — errors, warnings, a

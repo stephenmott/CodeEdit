@@ -147,6 +147,12 @@ TYPE
   // ("blue dots") a script debugger shows next to lines that generate code.
   TCodeEditorQueryLineEvent = PROCEDURE(Sender: TObject; Line: Integer;
     VAR Value: Boolean) OF OBJECT;
+  // Fired when the mouse hovers over an identifier. Line/Column are 1-based;
+  // AWord is the identifier under the cursor (dotted member chains like
+  // 'a.b' are returned whole). Set HintText to show a tooltip — e.g. a
+  // debugger's live value for the variable; leave it empty for no hint.
+  TCodeEditorHintEvent = PROCEDURE(Sender: TObject; Line, Column: Integer;
+    CONST AWord: STRING; VAR HintText: STRING) OF OBJECT;
 
   TCodeEditor = CLASS;
 
@@ -320,6 +326,11 @@ TYPE
     FOnSelectionChange: TCodeEditorSelectionChangeEvent;
     FOnZoomChanged: TNotifyEvent;
     FOnQueryExecutableLine: TCodeEditorQueryLineEvent;
+    FOnGetHint: TCodeEditorHintEvent;
+    FHoverTimer: TTimer;
+    FHintWindow: THintWindow;
+    FHoverMouse: TPoint;
+    FHintVisible: Boolean;
     PROCEDURE LinesChanged(Sender: TObject);
     PROCEDURE OptionsChanged(Sender: TObject);
     PROCEDURE ThemeChanged(Sender: TObject);
@@ -488,6 +499,10 @@ TYPE
     PROCEDURE PaintBreakpointGlyph(CONST CellRect: TRect; HasBp, IsExec: Boolean);
     PROCEDURE PaintExecutableDot(CONST CellRect: TRect);
     FUNCTION QueryExecutableLine(Line: Integer): Boolean;
+    FUNCTION WordAtPoint(CONST P: TPoint; OUT WordPos: TCodePosition): STRING;
+    PROCEDURE HoverTimerFired(Sender: TObject);
+    PROCEDURE ShowHoverHint(CONST P: TPoint; CONST HintText: STRING);
+    PROCEDURE HideHoverHint;
     PROCEDURE PaintLineMarkerGlyph(CONST CellRect: TRect; Marker: TCodeLineMarker);
     FUNCTION FirstLineMarkerAny(Line: Integer): TCodeLineMarker;
     FUNCTION MarkerBackgroundColor(Marker: TCodeLineMarker; CONST ThemeColors:
@@ -506,6 +521,7 @@ TYPE
     PROCEDURE PaintSelectedTextLine(ALineIndex, X, Y: Integer; CONST LineText: STRING);
     PROCEDURE CMFontChanged(VAR Message: TMessage); MESSAGE CM_FONTCHANGED;
     PROCEDURE CMStyleChanged(VAR Message: TMessage); MESSAGE CM_STYLECHANGED;
+    PROCEDURE CMMouseLeave(VAR Message: TMessage); MESSAGE CM_MOUSELEAVE;
     PROCEDURE WMGetDlgCode(VAR Message: TWMGetDlgCode); MESSAGE WM_GETDLGCODE;
     PROCEDURE WMHScroll(VAR Message: TWMHScroll); MESSAGE WM_HSCROLL;
     PROCEDURE WMMouseWheel(VAR Message: TWMMouseWheel); MESSAGE WM_MOUSEWHEEL;
@@ -624,6 +640,11 @@ TYPE
     // the script recompiles) to force a repaint.
     PROPERTY OnQueryExecutableLine: TCodeEditorQueryLineEvent READ FOnQueryExecutableLine
       WRITE FOnQueryExecutableLine;
+    // Hover-to-evaluate: fired after the mouse rests over an identifier. Set
+    // HintText to pop a tooltip (e.g. a debugger's live variable value). The
+    // hint clears automatically when the mouse moves, scrolls, or a key is
+    // pressed. Assigning this enables mouse tracking; leave it nil to disable.
+    PROPERTY OnGetHint: TCodeEditorHintEvent READ FOnGetHint WRITE FOnGetHint;
   END;
 
 IMPLEMENTATION
@@ -1134,6 +1155,12 @@ BEGIN
   FTopLine := 0;
   FLeftColumn := 0;
 
+  FHoverMouse := Point(-1, -1);
+  FHoverTimer := TTimer.Create(Self);
+  FHoverTimer.Enabled := False;
+  FHoverTimer.Interval := 450;
+  FHoverTimer.OnTimer := HoverTimerFired;
+
   Font.Name := 'Consolas';
   Font.Size := 10;
   UpdateMetrics;
@@ -1147,6 +1174,8 @@ BEGIN
   HideCompletion;
   HideSignatureHelp;
   HideTemplates;
+  HideHoverHint;
+  FHintWindow.Free;
   FCompletionForm.Free;
   FCompletionItems.Free;
   FSignatureItems.Free;
@@ -1282,6 +1311,7 @@ END;
 PROCEDURE TCodeEditor.WMKillFocus(VAR Message: TWMKillFocus);
 BEGIN
   HideCaret(Handle);
+  HideHoverHint;
   // Don't hide the popups when focus merely bounces back to the editor itself (which happens
   // during the popup Show + SetFocus sequence) or moves onto one of the popup windows.
   IF (Message.FocusedWnd <> Handle) AND (NOT WindowInPopups(Message.FocusedWnd)) THEN BEGIN
@@ -1309,6 +1339,7 @@ BEGIN
   HideCompletion;
   HideSignatureHelp;
   HideTemplates;
+  HideHoverHint;
   IF (Message.Keys AND MK_CONTROL) <> 0 THEN BEGIN
     IF Message.WheelDelta > 0 THEN
       ZoomIn
@@ -4431,6 +4462,7 @@ VAR
   UndoItem          : TCodeUndoItem;
 BEGIN
   INHERITED;
+  HideHoverHint;
 
   IF CompletionVisible THEN BEGIN
     CASE Key OF
@@ -4783,6 +4815,7 @@ VAR
   NewPos            : Integer;
 BEGIN
   INHERITED;
+  HideHoverHint;
   IF Button = mbLeft THEN BEGIN
     SetFocus;
     HideCompletion;
@@ -4898,8 +4931,18 @@ BEGIN
     Exit;
   END;
 
-  IF ssLeft IN Shift THEN
+  IF ssLeft IN Shift THEN BEGIN
     MoveCaret(PointToCaret(Point(X, Y)), Shift + [ssShift]);
+    HideHoverHint;
+    Exit;
+  END;
+
+  // Hover-to-hint: restart the dwell timer whenever the mouse actually moves.
+  IF Assigned(FOnGetHint) AND ((X <> FHoverMouse.X) OR (Y <> FHoverMouse.Y)) THEN BEGIN
+    HideHoverHint;
+    FHoverMouse := Point(X, Y);
+    FHoverTimer.Enabled := True;
+  END;
 END;
 
 PROCEDURE TCodeEditor.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -5179,6 +5222,108 @@ BEGIN
   Result := False;
   IF Assigned(FOnQueryExecutableLine) THEN
     FOnQueryExecutableLine(Self, Line, Result);
+END;
+
+FUNCTION TCodeEditor.WordAtPoint(CONST P: TPoint; OUT WordPos: TCodePosition): STRING;
+VAR
+  R                 : TRect;
+  LineIndex         : Integer;
+  Col               : Integer;
+  LineText          : STRING;
+  StartCol          : Integer;
+  EndCol            : Integer;
+BEGIN
+  Result := '';
+  WordPos := TCodePosition.Create(0, 0);
+  R := ClientTextRect;
+  IF (P.X < R.Left) OR (P.Y < R.Top) THEN
+    Exit;                               // over the gutter or above the text
+
+  LineIndex := FTopLine + (P.Y - R.Top) DIV FLineHeight;
+  IF (LineIndex < 0) OR (LineIndex >= FLines.Count) THEN
+    Exit;
+  // Character directly under the mouse (no half-cell rounding — we want the
+  // glyph pointed at, not the nearest caret gap). Col is a 1-based string index.
+  Col := FLeftColumn + (P.X - R.Left) DIV FCharWidth + 1;
+  LineText := FLines[LineIndex];
+  IF (Col < 1) OR (Col > Length(LineText)) OR NOT IsWordChar(LineText[Col]) THEN
+    Exit;
+
+  StartCol := Col;
+  EndCol := Col;
+  WHILE (StartCol > 1) AND IsWordChar(LineText[StartCol - 1]) DO
+    Dec(StartCol);
+  WHILE (EndCol < Length(LineText)) AND IsWordChar(LineText[EndCol + 1]) DO
+    Inc(EndCol);
+  // Absorb a leading dotted member chain (a.b.c) so hovering a field still
+  // yields the qualified name the evaluator expects.
+  WHILE (StartCol > 2) AND (LineText[StartCol - 1] = '.') AND
+    IsWordChar(LineText[StartCol - 2]) DO
+  BEGIN
+    Dec(StartCol, 2);
+    WHILE (StartCol > 1) AND IsWordChar(LineText[StartCol - 1]) DO
+      Dec(StartCol);
+  END;
+
+  WordPos := TCodePosition.Create(LineIndex, Col - 1);
+  Result := Copy(LineText, StartCol, EndCol - StartCol + 1);
+END;
+
+PROCEDURE TCodeEditor.HoverTimerFired(Sender: TObject);
+VAR
+  HoverWord         : STRING;
+  WordPos           : TCodePosition;
+  HintText          : STRING;
+BEGIN
+  FHoverTimer.Enabled := False;
+  IF NOT Assigned(FOnGetHint) THEN
+    Exit;
+  // Don't fight the other popups for screen space.
+  IF CompletionVisible OR SignatureVisible OR TemplatesVisible THEN
+    Exit;
+
+  HoverWord := WordAtPoint(FHoverMouse, WordPos);
+  IF HoverWord = '' THEN
+    Exit;
+
+  HintText := '';
+  FOnGetHint(Self, WordPos.Line + 1, WordPos.Column + 1, HoverWord, HintText);
+  IF HintText <> '' THEN
+    ShowHoverHint(FHoverMouse, HintText);
+END;
+
+PROCEDURE TCodeEditor.ShowHoverHint(CONST P: TPoint; CONST HintText: STRING);
+VAR
+  R                 : TRect;
+  Origin            : TPoint;
+BEGIN
+  IF HintText = '' THEN
+    Exit;
+  IF FHintWindow = NIL THEN
+    FHintWindow := THintWindow.Create(Self);
+
+  R := FHintWindow.CalcHintRect(Max(240, ClientWidth - P.X), HintText, NIL);
+  Origin := ClientToScreen(Point(P.X + 12, P.Y + FLineHeight + 2));
+  OffsetRect(R, Origin.X, Origin.Y);
+  FHintWindow.ActivateHint(R, HintText);
+  FHintVisible := True;
+END;
+
+PROCEDURE TCodeEditor.HideHoverHint;
+BEGIN
+  FHoverTimer.Enabled := False;
+  IF FHintVisible THEN BEGIN
+    IF Assigned(FHintWindow) THEN
+      FHintWindow.ReleaseHandle;
+    FHintVisible := False;
+  END;
+END;
+
+PROCEDURE TCodeEditor.CMMouseLeave(VAR Message: TMessage);
+BEGIN
+  INHERITED;
+  HideHoverHint;
+  FHoverMouse := Point(-1, -1);
 END;
 
 FUNCTION TCodeEditor.FirstLineMarkerAny(Line: Integer): TCodeLineMarker;
