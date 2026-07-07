@@ -1767,7 +1767,15 @@ END;
 
 FUNCTION TCodeEditor.NormalizePosition(CONST Position: TCodePosition): TCodePosition;
 BEGIN
-  Result.Line := EnsureRange(Position.Line, 0, Max(0, FLines.Count - 1));
+  // An empty control has zero lines, so FLines[0] would raise EStringListError
+  // ('TStringList is empty'). Any caret/selection/ExecutionLine set routes through
+  // here, so clamp to the origin when there's no text.
+  IF FLines.Count = 0 THEN BEGIN
+    Result.Line := 0;
+    Result.Column := 0;
+    Exit;
+  END;
+  Result.Line := EnsureRange(Position.Line, 0, FLines.Count - 1);
   Result.Column := EnsureRange(Position.Column, 0, Length(FLines[Result.Line]));
 END;
 
@@ -1946,6 +1954,10 @@ VAR
 BEGIN
   Result := False;
   IF NOT FOptions.BracketMatching THEN
+    Exit;
+  // An empty control has no lines at all — NormalizePosition still yields line 0,
+  // but FLines[0] would raise EStringListError. No text means no bracket to match.
+  IF FLines.Count = 0 THEN
     Exit;
 
   Probe := NormalizePosition(FCaret);
