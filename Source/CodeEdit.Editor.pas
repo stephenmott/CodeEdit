@@ -4299,24 +4299,32 @@ BEGIN
       END;
     Parts.Add(Copy(Normalized, StartIndex, MaxInt));
 
-    Current := FLines[FCaret.Line];
-    Tail := Copy(Current, FCaret.Column + 1, MaxInt);
-    FLines[FCaret.Line] := Copy(Current, 1, FCaret.Column) + Parts[0];
-    FCaret.Column := Length(FLines[FCaret.Line]);
+    // Batch the per-line inserts: without BeginUpdate every Insert fires the
+    // full OnChange pipeline (gutter/scrollbars/search/repaint), making a
+    // multi-thousand-line paste take seconds. EndUpdate fires it once.
+    FLines.BeginUpdate;
+    TRY
+      Current := FLines[FCaret.Line];
+      Tail := Copy(Current, FCaret.Column + 1, MaxInt);
+      FLines[FCaret.Line] := Copy(Current, 1, FCaret.Column) + Parts[0];
+      FCaret.Column := Length(FLines[FCaret.Line]);
 
-    IF Parts.Count > 1 THEN BEGIN
-      ShiftBreakpoints(FCaret.Line + 1, Parts.Count - 1);
-      ShiftLineMarkers(FCaret.Line + 1, Parts.Count - 1);
+      IF Parts.Count > 1 THEN BEGIN
+        ShiftBreakpoints(FCaret.Line + 1, Parts.Count - 1);
+        ShiftLineMarkers(FCaret.Line + 1, Parts.Count - 1);
+      END;
+
+      FOR I := 1 TO Parts.Count - 1 DO BEGIN
+        FLines.Insert(FCaret.Line + 1, Parts[I]);
+        Inc(FCaret.Line);
+        FCaret.Column := Length(Parts[I]);
+      END;
+
+      FLines[FCaret.Line] := FLines[FCaret.Line] + Tail;
+      FAnchor := FCaret;
+    FINALLY
+      FLines.EndUpdate;
     END;
-
-    FOR I := 1 TO Parts.Count - 1 DO BEGIN
-      FLines.Insert(FCaret.Line + 1, Parts[I]);
-      Inc(FCaret.Line);
-      FCaret.Column := Length(Parts[I]);
-    END;
-
-    FLines[FCaret.Line] := FLines[FCaret.Line] + Tail;
-    FAnchor := FCaret;
   FINALLY
     Parts.Free;
   END;
