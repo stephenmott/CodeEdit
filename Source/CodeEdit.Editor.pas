@@ -3792,6 +3792,18 @@ END;
 
 PROCEDURE TCodeEditor.LinesChanged(Sender: TObject);
 BEGIN
+  // The Lines getter exposes the raw TStringList, so external code can empty
+  // it (Lines.Clear / Lines.Text := '') bypassing SetLines' guard. The editor
+  // requires at least one line (InsertText etc. index FLines[FCaret.Line]).
+  // Reset the caret first, then re-add: Add fires OnChange re-entrantly and
+  // that pass runs the body below with a consistent one-line state.
+  IF FLines.Count = 0 THEN BEGIN
+    FCaret := TCodePosition.Create(0, 0);
+    FAnchor := FCaret;
+    FLines.Add('');
+    Exit;
+  END;
+
   FMaxLineLengthValid := False;
   FDesiredColumn := -1;
   // We don't know which line changed, so restart state validation from the
