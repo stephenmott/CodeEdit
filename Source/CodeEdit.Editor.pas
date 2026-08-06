@@ -477,6 +477,7 @@ TYPE
     PROCEDURE UpdateCaret;
     PROCEDURE InvalidateTextArea;
     PROCEDURE InvalidateTextLines(FirstLine, LastLine: Integer);
+    PROCEDURE ScrollViewport(OldTopLine: Integer);
     FUNCTION OccurrenceNeedle: STRING;
     PROCEDURE UpdateMetrics;
     PROCEDURE UpdateGutterWidth;
@@ -1354,6 +1355,7 @@ PROCEDURE TCodeEditor.WMMouseWheel(VAR Message: TWMMouseWheel);
 VAR
   DeltaLines        : Integer;
   NewTop            : Integer;
+  OldTop            : Integer;
 BEGIN
   HideCompletion;
   HideSignatureHelp;
@@ -1370,14 +1372,16 @@ BEGIN
   NewTop := EnsureRange(FTopLine + DeltaLines, 0, Max(0, FLines.Count - VisibleLineCount));
   IF NewTop = FTopLine THEN
     Exit;
+  OldTop := FTopLine;
   FTopLine := NewTop;
   UpdateScrollBars;
-  Invalidate;
+  ScrollViewport(OldTop);
 END;
 
 PROCEDURE TCodeEditor.WMVScroll(VAR Message: TWMVScroll);
 VAR
   NewTop            : Integer;
+  OldTop            : Integer;
   Info              : TScrollInfo;
 BEGIN
   INHERITED;
@@ -1402,10 +1406,11 @@ BEGIN
   NewTop := EnsureRange(NewTop, 0, Max(0, FLines.Count - VisibleLineCount));
   IF NewTop = FTopLine THEN
     Exit;
+  OldTop := FTopLine;
   FTopLine := NewTop;
   UpdateScrollBars;
   UpdateCaret;
-  Invalidate;
+  ScrollViewport(OldTop);
 END;
 
 PROCEDURE TCodeEditor.UpdateMetrics;
@@ -1641,7 +1646,7 @@ VAR
   R                 : TRect;
   ScrollOffset      : Integer;
   TargetLine        : Integer;
-  MaxTopLine        : Integer;
+  OldTop            : Integer;
 BEGIN
   R := MinimapRect;
   IF R.Height <= 0 THEN
@@ -1649,12 +1654,66 @@ BEGIN
 
   ScrollOffset := MinimapScrollOffset;
   TargetLine := (ScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapLineHeight;
+  OldTop := FTopLine;
   FTopLine := TargetLine - VisibleLineCount DIV 2;
-  MaxTopLine := Max(0, FLines.Count - VisibleLineCount);
-  FTopLine := EnsureRange(FTopLine, 0, MaxTopLine);
+  FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
   UpdateScrollBars;
   UpdateCaret;
-  Invalidate;
+  ScrollViewport(OldTop);
+END;
+
+PROCEDURE TCodeEditor.ScrollViewport(OldTopLine: Integer);
+VAR
+  Delta             : Integer;
+  ScrollR           : TRect;
+  R                 : TRect;
+  SaveTop           : Integer;
+  OldOffset         : Integer;
+  OldViewport       : TRect;
+BEGIN
+  Delta := FTopLine - OldTopLine;
+  IF Delta = 0 THEN
+    Exit;
+  IF NOT HandleAllocated OR (Abs(Delta) >= VisibleLineCount) THEN BEGIN
+    Invalidate;
+    Exit;
+  END;
+
+  // Gutter and text shift together by whole lines. ScrollWindowEx becomes a
+  // screen-to-screen copy (an RDP scroll order - nearly free remotely) and
+  // SW_INVALIDATE queues only the newly exposed strip for painting.
+  ScrollR := ClientTextRect;
+  ScrollR.Left := 0;
+  Winapi.Windows.ScrollWindowEx(Handle, 0, -Delta * FLineHeight, @ScrollR, @ScrollR, 0, NIL,
+    SW_INVALIDATE);
+
+  // Minimap state as it was before the move: when the map content itself is not
+  // scrolled (short files, or offset unchanged at this delta) only the viewport
+  // box moves, so repaint just its old and new bands instead of the whole map.
+  SaveTop := FTopLine;
+  FTopLine := OldTopLine;
+  OldOffset := MinimapScrollOffset;
+  OldViewport := MinimapViewportRect;
+  FTopLine := SaveTop;
+
+  IF MinimapVisible THEN BEGIN
+    IF MinimapScrollOffset = OldOffset THEN BEGIN
+      R := OldViewport;
+      InflateRect(R, 0, 2);
+      Winapi.Windows.InvalidateRect(Handle, @R, False);
+      R := MinimapViewportRect;
+      InflateRect(R, 0, 2);
+      Winapi.Windows.InvalidateRect(Handle, @R, False);
+    END ELSE BEGIN
+      R := MinimapRect;
+      Winapi.Windows.InvalidateRect(Handle, @R, False);
+    END;
+  END;
+
+  IF StyledVerticalVisible THEN BEGIN
+    R := StyledVerticalScrollRect;
+    Winapi.Windows.InvalidateRect(Handle, @R, False);
+  END;
 END;
 
 FUNCTION TCodeEditor.StyledVerticalVisible: Boolean;
@@ -3879,14 +3938,17 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditor.SetTopLine(Value: Integer);
+VAR
+  OldTop            : Integer;
 BEGIN
   Value := EnsureRange(Value, 0, Max(0, FLines.Count - VisibleLineCount));
   IF FTopLine = Value THEN
     Exit;
+  OldTop := FTopLine;
   FTopLine := Value;
   UpdateScrollBars;
   UpdateCaret;
-  Invalidate;
+  ScrollViewport(OldTop);
 END;
 
 FUNCTION TCodeEditor.GetLines: TStrings;
@@ -4612,24 +4674,29 @@ BEGIN
 
   // Repaint only what a caret/selection move can change. A full Invalidate on
   // every drag tick repaints the minimap and gutter too, which flickers badly
-  // over RDP. Scrolling, multi-caret teardown or an occurrence-highlight change
-  // still fall back to wider repaints.
-  IF (FTopLine <> OldTopLine) OR (FLeftColumn <> OldLeftColumn) OR HadExtra THEN
+  // over RDP. Vertical scrolling becomes a ScrollWindowEx copy; horizontal
+  // scrolling, multi-caret teardown or an occurrence-highlight change still
+  // fall back to wider repaints.
+  IF (FLeftColumn <> OldLeftColumn) OR HadExtra THEN
     Invalidate
-  ELSE IF OccurrenceNeedle <> OldNeedle THEN
-    InvalidateTextArea
   ELSE BEGIN
-    IncludeLine(FCaret.Line);
-    IF NOT (ssShift IN Shift) THEN BEGIN
-      // Selection collapsed: the old selected span needs unpainting.
-      IncludeLine(OldAnchor.Line);
-      IncludeLine(OldCaret.Line);
+    IF FTopLine <> OldTopLine THEN
+      ScrollViewport(OldTopLine);
+    IF OccurrenceNeedle <> OldNeedle THEN
+      InvalidateTextArea
+    ELSE BEGIN
+      IncludeLine(FCaret.Line);
+      IF NOT (ssShift IN Shift) THEN BEGIN
+        // Selection collapsed: the old selected span needs unpainting.
+        IncludeLine(OldAnchor.Line);
+        IncludeLine(OldCaret.Line);
+      END;
+      IF MatchingBracketPosition(BrOpen, BrClose) THEN BEGIN
+        IncludeLine(BrOpen.Line);
+        IncludeLine(BrClose.Line);
+      END;
+      InvalidateTextLines(FirstLine, LastLine);
     END;
-    IF MatchingBracketPosition(BrOpen, BrClose) THEN BEGIN
-      IncludeLine(BrOpen.Line);
-      IncludeLine(BrClose.Line);
-    END;
-    InvalidateTextLines(FirstLine, LastLine);
   END;
   DoCaretChange;
   DoSelectionChange;
@@ -5077,6 +5144,7 @@ PROCEDURE TCodeEditor.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: 
 VAR
   Thumb             : TRect;
   NewPos            : Integer;
+  OldTop            : Integer;
 BEGIN
   INHERITED;
   HideHoverHint;
@@ -5101,9 +5169,10 @@ BEGIN
           NewPos := FTopLine + VisibleLineCount;
         NewPos := EnsureRange(NewPos, 0, Max(0, FLines.Count - VisibleLineCount));
         IF NewPos <> FTopLine THEN BEGIN
+          OldTop := FTopLine;
           FTopLine := NewPos;
           UpdateScrollBars;
-          Invalidate;
+          ScrollViewport(OldTop);
         END;
       END;
       Exit;
@@ -5148,6 +5217,7 @@ VAR
   MaxTopLine        : Integer;
   MaxLeftCol        : Integer;
   NewPos            : Integer;
+  OldTop            : Integer;
 BEGIN
   INHERITED;
   IF FScrollBarDragging THEN BEGIN
@@ -5162,10 +5232,11 @@ BEGIN
     ELSE
       NewPos := 0;
     IF NewPos <> FTopLine THEN BEGIN
+      OldTop := FTopLine;
       FTopLine := NewPos;
       UpdateScrollBars;
       UpdateCaret;
-      Invalidate;
+      ScrollViewport(OldTop);
     END;
     Exit;
   END;
