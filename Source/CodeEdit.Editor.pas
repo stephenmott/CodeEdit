@@ -6028,7 +6028,9 @@ BEGIN
     IF IsDarkTheme(ThemeColors) THEN
       Canvas.Pen.Color := ShiftBrightness(ThemeColors.SelectionBackground, -20)
     ELSE
-      Canvas.Pen.Color := ShiftBrightness(ThemeColors.SelectionBackground, 20);
+      // Light selection colours brightened further were invisible on the pale
+      // map background - darken hard instead so the box reads on light themes.
+      Canvas.Pen.Color := ShiftBrightness(ThemeColors.SelectionBackground, -90);
     Canvas.Rectangle(ViewR);
     Canvas.Brush.Style := bsSolid;
   END;
