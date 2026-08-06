@@ -442,6 +442,7 @@ TYPE
     PROCEDURE SetSearchButtonGlyph(Button: TSpeedButton; CONST Kind: STRING);
     PROCEDURE StyleSearchEdit(Edit: TEdit);
     PROCEDURE StyleSearchButton(Button: TSpeedButton);
+    PROCEDURE RestyleSearchPanel;
     PROCEDURE LayoutSearchPanel;
     PROCEDURE UpdateSearch;
     PROCEDURE SelectSearchMatch(Index: Integer);
@@ -473,6 +474,9 @@ TYPE
     PROCEDURE DeleteAllSelections(DeletePrevious: Boolean);
     PROCEDURE EnsureCaretVisible;
     PROCEDURE UpdateCaret;
+    PROCEDURE InvalidateTextArea;
+    PROCEDURE InvalidateTextLines(FirstLine, LastLine: Integer);
+    FUNCTION OccurrenceNeedle: STRING;
     PROCEDURE UpdateMetrics;
     PROCEDURE UpdateGutterWidth;
     PROCEDURE SetZoom(Value: Integer);
@@ -1514,6 +1518,45 @@ BEGIN
   P := CaretToPoint(FCaret);
   SetCaretPos(P.X, P.Y);
   ShowCaret(Handle);
+END;
+
+PROCEDURE TCodeEditor.InvalidateTextArea;
+VAR
+  R                 : TRect;
+BEGIN
+  // The text strip only - gutter, minimap and styled scrollbars are unaffected
+  // by caret/selection changes, and excluding them keeps repaints cheap over RDP.
+  IF NOT HandleAllocated THEN
+    Exit;
+  R := ClientTextRect;
+  Winapi.Windows.InvalidateRect(Handle, @R, False);
+END;
+
+PROCEDURE TCodeEditor.InvalidateTextLines(FirstLine, LastLine: Integer);
+VAR
+  R                 : TRect;
+BEGIN
+  IF NOT HandleAllocated THEN
+    Exit;
+  // Clamp the absolute line range to the viewport; each visible row I occupies
+  // the pixel band [I*FLineHeight, (I+1)*FLineHeight] (PaintText draws at I*LH+1).
+  FirstLine := Max(FirstLine, FTopLine);
+  LastLine := Min(LastLine, FTopLine + VisibleLineCount);
+  IF LastLine < FirstLine THEN
+    Exit;
+  R := ClientTextRect;
+  R.Top := Max(R.Top, (FirstLine - FTopLine) * FLineHeight);
+  R.Bottom := Min(R.Bottom, (LastLine - FTopLine + 1) * FLineHeight + 1);
+  IF R.Bottom > R.Top THEN
+    Winapi.Windows.InvalidateRect(Handle, @R, False);
+END;
+
+FUNCTION TCodeEditor.OccurrenceNeedle: STRING;
+BEGIN
+  // Mirrors PaintText: a single-line selection highlights its other occurrences.
+  Result := '';
+  IF HasSelection AND (SelectionStart.Line = SelectionEnd.Line) THEN
+    Result := GetSelectedText;
 END;
 
 FUNCTION TCodeEditor.ClientTextRect: TRect;
@@ -3055,7 +3098,6 @@ BEGIN
   FSearchPanel.Parent := Self;
   FSearchPanel.BevelOuter := bvRaised;
   FSearchPanel.ParentBackground := False;
-  FSearchPanel.Color := $00303030;
   FSearchPanel.StyleElements := [];
   FSearchPanel.Visible := False;
   FSearchPanel.Width := 760;
@@ -3098,7 +3140,7 @@ BEGIN
   FSearchStatusLabel.AutoSize := False;
   FSearchStatusLabel.Alignment := taCenter;
   FSearchStatusLabel.Layout := tlCenter;
-  FSearchStatusLabel.Font.Color := clWhite;
+  FSearchStatusLabel.Transparent := True;
   FSearchStatusLabel.Font.Name := 'Segoe UI';
   FSearchStatusLabel.Font.Size := 11;
   FSearchStatusLabel.StyleElements := [];
@@ -3115,13 +3157,23 @@ BEGIN
   FSearchCloseButton := NewButton('', 'Close', 30);
   SetSearchButtonGlyph(FSearchCloseButton, 'close');
 
+  RestyleSearchPanel;
   LayoutSearchPanel;
 END;
 
 PROCEDURE TCodeEditor.SetSearchButtonGlyph(Button: TSpeedButton; CONST Kind: STRING);
 VAR
   Bmp               : Vcl.Graphics.TBitmap;
+  Theme             : TCodeEditorThemeColors;
+  GlyphColor        : TColor;
 BEGIN
+  // Glyphs follow the theme's text colour; hardcoded white vanished on light skins.
+  Theme := ActiveTheme;
+  TRY
+    GlyphColor := Theme.Text;
+  FINALLY
+    Theme.Free;
+  END;
   Bmp := Vcl.Graphics.TBitmap.Create;
   TRY
     Bmp.SetSize(16, 16);
@@ -3129,7 +3181,7 @@ BEGIN
     Bmp.Canvas.FillRect(Rect(0, 0, 16, 16));
     Bmp.Transparent := True;
     Bmp.TransparentColor := clFuchsia;
-    Bmp.Canvas.Pen.Color := clWhite;
+    Bmp.Canvas.Pen.Color := GlyphColor;
     Bmp.Canvas.Pen.Width := 2;
 
     IF Kind = 'expand' THEN BEGIN
@@ -3170,13 +3222,14 @@ END;
 
 PROCEDURE TCodeEditor.StyleSearchEdit(Edit: TEdit);
 BEGIN
-  Edit.AutoSize := False;
+  // AutoSize keeps the edit at text height; LayoutSearchPanel centres it in its
+  // row so the text sits on the row's vertical middle instead of hanging at the
+  // top of an oversized box.
+  Edit.AutoSize := True;
   Edit.ParentColor := False;
-  Edit.Color := $00252525;
   Edit.StyleElements := [];
   Edit.Font.Name := 'Segoe UI';
   Edit.Font.Size := 11;
-  Edit.Font.Color := clWhite;
   Edit.BorderStyle := bsSingle;
   Edit.Ctl3D := False;
 END;
@@ -3184,11 +3237,62 @@ END;
 PROCEDURE TCodeEditor.StyleSearchButton(Button: TSpeedButton);
 BEGIN
   Button.Flat := True;
-  Button.Transparent := False;
+  Button.Transparent := True;
   Button.StyleElements := [];
   Button.Font.Name := 'Segoe UI';
   Button.Font.Size := 11;
-  Button.Font.Color := clWhite;
+END;
+
+PROCEDURE TCodeEditor.RestyleSearchPanel;
+VAR
+  Theme             : TCodeEditorThemeColors;
+  PanelColor        : TColor;
+  EditColor         : TColor;
+
+  PROCEDURE StyleEditColors(Edit: TEdit);
+  BEGIN
+    Edit.Color := EditColor;
+    Edit.Font.Color := Theme.Text;
+  END;
+
+BEGIN
+  // Follow the editor's active theme (which itself follows the DevExpress skin)
+  // instead of the original hardcoded VS Code dark colours.
+  IF NOT Assigned(FSearchPanel) THEN
+    Exit;
+  Theme := ActiveTheme;
+  TRY
+    IF IsDarkTheme(Theme) THEN BEGIN
+      PanelColor := ShiftBrightness(Theme.Background, 18);
+      EditColor := ShiftBrightness(Theme.Background, -8);
+    END ELSE BEGIN
+      PanelColor := ShiftBrightness(Theme.Background, -14);
+      EditColor := Theme.Background;
+    END;
+    FSearchPanel.Color := PanelColor;
+    StyleEditColors(FSearchEdit);
+    StyleEditColors(FReplaceEdit);
+    FSearchStatusLabel.Font.Color := Theme.Text;
+    FSearchExpandButton.Font.Color := Theme.Text;
+    FSearchMatchCaseButton.Font.Color := Theme.Text;
+    FSearchWholeWordButton.Font.Color := Theme.Text;
+    FSearchRegexButton.Font.Color := Theme.Text;
+    FSearchPrevButton.Font.Color := Theme.Text;
+    FSearchNextButton.Font.Color := Theme.Text;
+    FSearchReplaceButton.Font.Color := Theme.Text;
+    FSearchReplaceAllButton.Font.Color := Theme.Text;
+    FSearchCloseButton.Font.Color := Theme.Text;
+    // Redraw the glyph buttons with the theme's pen colour.
+    IF FSearchExpanded THEN
+      SetSearchButtonGlyph(FSearchExpandButton, 'collapse')
+    ELSE
+      SetSearchButtonGlyph(FSearchExpandButton, 'expand');
+    SetSearchButtonGlyph(FSearchPrevButton, 'prev');
+    SetSearchButtonGlyph(FSearchNextButton, 'next');
+    SetSearchButtonGlyph(FSearchCloseButton, 'close');
+  FINALLY
+    Theme.Free;
+  END;
 END;
 
 PROCEDURE TCodeEditor.LayoutSearchPanel;
@@ -3220,8 +3324,12 @@ BEGIN
   Inc(X, 40);
 
   EditWidth := Max(180, PanelWidth - 450);
-  FSearchEdit.SetBounds(X, TopOffset, EditWidth, 34);
-  FReplaceEdit.SetBounds(X, TopOffset + 42, EditWidth, 34);
+  // The edits are AutoSize (text height); centre them on the 34px button row so
+  // the text sits on the row's vertical middle.
+  FSearchEdit.SetBounds(X, TopOffset + Max(0, (34 - FSearchEdit.Height) DIV 2),
+    EditWidth, FSearchEdit.Height);
+  FReplaceEdit.SetBounds(X, TopOffset + 42 + Max(0, (34 - FReplaceEdit.Height) DIV 2),
+    EditWidth, FReplaceEdit.Height);
   Inc(X, EditWidth + 10);
 
   FSearchMatchCaseButton.SetBounds(X, ButtonTop, 40, 34);
@@ -3506,6 +3614,7 @@ PROCEDURE TCodeEditor.ShowFind;
 BEGIN
   CreateSearchPanel;
   FSearchExpanded := False;
+  RestyleSearchPanel; // pick up any skin change since the panel was created
   LayoutSearchPanel;
   FSearchPanel.Show;
   FSearchPanel.BringToFront;
@@ -3519,6 +3628,7 @@ PROCEDURE TCodeEditor.ShowReplace;
 BEGIN
   CreateSearchPanel;
   FSearchExpanded := True;
+  RestyleSearchPanel;
   LayoutSearchPanel;
   FSearchPanel.Show;
   FSearchPanel.BringToFront;
@@ -4425,17 +4535,70 @@ END;
 
 PROCEDURE TCodeEditor.MoveCaret(CONST Position: TCodePosition; Shift: TShiftState;
   PreserveDesiredColumn: Boolean);
+VAR
+  OldCaret          : TCodePosition;
+  OldAnchor         : TCodePosition;
+  OldTopLine        : Integer;
+  OldLeftColumn     : Integer;
+  OldNeedle         : STRING;
+  HadExtra          : Boolean;
+  BrOpen            : TCodePosition;
+  BrClose           : TCodePosition;
+  FirstLine         : Integer;
+  LastLine          : Integer;
+
+  PROCEDURE IncludeLine(Line: Integer);
+  BEGIN
+    FirstLine := Min(FirstLine, Line);
+    LastLine := Max(LastLine, Line);
+  END;
+
 BEGIN
   FinishUndoGroup;
   IF NOT PreserveDesiredColumn THEN
     FDesiredColumn := -1;
+
+  OldCaret := FCaret;
+  OldAnchor := FAnchor;
+  OldTopLine := FTopLine;
+  OldLeftColumn := FLeftColumn;
+  OldNeedle := OccurrenceNeedle;
+  HadExtra := HasMultipleSelections;
+  FirstLine := FCaret.Line;
+  LastLine := FCaret.Line;
+  IF MatchingBracketPosition(BrOpen, BrClose) THEN BEGIN
+    IncludeLine(BrOpen.Line);
+    IncludeLine(BrClose.Line);
+  END;
+
   IF NOT (ssShift IN Shift) THEN
     ClearExtraSelections;
   FCaret := NormalizePosition(Position);
   IF NOT (ssShift IN Shift) THEN
     FAnchor := FCaret;
   EnsureCaretVisible;
-  Invalidate;
+
+  // Repaint only what a caret/selection move can change. A full Invalidate on
+  // every drag tick repaints the minimap and gutter too, which flickers badly
+  // over RDP. Scrolling, multi-caret teardown or an occurrence-highlight change
+  // still fall back to wider repaints.
+  IF (FTopLine <> OldTopLine) OR (FLeftColumn <> OldLeftColumn) OR HadExtra THEN
+    Invalidate
+  ELSE IF OccurrenceNeedle <> OldNeedle THEN
+    InvalidateTextArea
+  ELSE BEGIN
+    IncludeLine(FCaret.Line);
+    IF NOT (ssShift IN Shift) THEN BEGIN
+      // Selection collapsed: the old selected span needs unpainting.
+      IncludeLine(OldAnchor.Line);
+      IncludeLine(OldCaret.Line);
+    END;
+    IF MatchingBracketPosition(BrOpen, BrClose) THEN BEGIN
+      IncludeLine(BrOpen.Line);
+      IncludeLine(BrClose.Line);
+    END;
+    InvalidateTextLines(FirstLine, LastLine);
+  END;
   DoCaretChange;
   DoSelectionChange;
 END;
@@ -4609,9 +4772,27 @@ BEGIN
         FSuppressKeyPress := True;
         Key := 0;
       END;
+    VK_INSERT:
+      // Classic clipboard chords; keeps them working now the host forms no longer
+      // bind them form-wide (which hijacked paste while the search box had focus).
+      IF Shift = [ssCtrl] THEN BEGIN
+        CopyToClipboard;
+        Key := 0;
+      END ELSE IF Shift = [ssShift] THEN BEGIN
+        HideCompletion;
+        HideSignatureHelp;
+        HideTemplates;
+        PasteFromClipboard;
+        Key := 0;
+      END;
     VK_DELETE: BEGIN
         IF FReadOnly THEN BEGIN
           MessageBeep(MB_ICONWARNING);
+          Key := 0;
+          Exit;
+        END;
+        IF Shift = [ssShift] THEN BEGIN
+          CutToClipboard;
           Key := 0;
           Exit;
         END;
