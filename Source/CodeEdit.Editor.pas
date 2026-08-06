@@ -1667,8 +1667,10 @@ VAR
   Delta             : Integer;
   ScrollR           : TRect;
   R                 : TRect;
+  MapR              : TRect;
   SaveTop           : Integer;
   OldOffset         : Integer;
+  OffsetDelta       : Integer;
   OldViewport       : TRect;
 BEGIN
   Delta := FTopLine - OldTopLine;
@@ -1687,9 +1689,7 @@ BEGIN
   Winapi.Windows.ScrollWindowEx(Handle, 0, -Delta * FLineHeight, @ScrollR, @ScrollR, 0, NIL,
     SW_INVALIDATE);
 
-  // Minimap state as it was before the move: when the map content itself is not
-  // scrolled (short files, or offset unchanged at this delta) only the viewport
-  // box moves, so repaint just its old and new bands instead of the whole map.
+  // Minimap state as it was before the move.
   SaveTop := FTopLine;
   FTopLine := OldTopLine;
   OldOffset := MinimapScrollOffset;
@@ -1697,15 +1697,24 @@ BEGIN
   FTopLine := SaveTop;
 
   IF MinimapVisible THEN BEGIN
-    IF MinimapScrollOffset = OldOffset THEN BEGIN
+    MapR := MinimapRect;
+    OffsetDelta := MinimapScrollOffset - OldOffset;
+    IF Abs(OffsetDelta) >= MapR.Height THEN BEGIN
+      Winapi.Windows.InvalidateRect(Handle, @MapR, False);
+    END ELSE BEGIN
+      IF OffsetDelta <> 0 THEN
+        // The map content scrolls too - copy it and repaint only the exposed
+        // sliver, exactly like the text area.
+        Winapi.Windows.ScrollWindowEx(Handle, 0, -OffsetDelta, @MapR, @MapR, 0, NIL,
+          SW_INVALIDATE);
+      // The viewport box is drawn on the content: erase the old box (its copy
+      // moved with the scroll) and draw it at the new position.
       R := OldViewport;
+      OffsetRect(R, 0, -OffsetDelta);
       InflateRect(R, 0, 2);
       Winapi.Windows.InvalidateRect(Handle, @R, False);
       R := MinimapViewportRect;
       InflateRect(R, 0, 2);
-      Winapi.Windows.InvalidateRect(Handle, @R, False);
-    END ELSE BEGIN
-      R := MinimapRect;
       Winapi.Windows.InvalidateRect(Handle, @R, False);
     END;
   END;
