@@ -302,6 +302,7 @@ TYPE
     FScrollDragOffset: Integer;
     FSelections: TList<TCodeSelectionRange>;
     FSuppressKeyPress: Boolean;
+    FSuppressSysChar: Boolean;
     FApplyingUndo: Boolean;
     FActiveUndoItem: TCodeUndoItem;
     FActiveUndoGroup: TCodeUndoGroupKind;
@@ -523,6 +524,7 @@ TYPE
     PROCEDURE CMStyleChanged(VAR Message: TMessage); MESSAGE CM_STYLECHANGED;
     PROCEDURE CMMouseLeave(VAR Message: TMessage); MESSAGE CM_MOUSELEAVE;
     PROCEDURE WMGetDlgCode(VAR Message: TWMGetDlgCode); MESSAGE WM_GETDLGCODE;
+    PROCEDURE WMSysChar(VAR Message: TWMSysChar); MESSAGE WM_SYSCHAR;
     PROCEDURE WMHScroll(VAR Message: TWMHScroll); MESSAGE WM_HSCROLL;
     PROCEDURE WMMouseWheel(VAR Message: TWMMouseWheel); MESSAGE WM_MOUSEWHEEL;
     PROCEDURE WMPaste(VAR Message: TWMPaste); MESSAGE WM_PASTE;
@@ -1241,6 +1243,18 @@ BEGIN
   INHERITED;
   Message.Result := Message.Result OR DLGC_WANTALLKEYS OR DLGC_WANTARROWS OR DLGC_WANTCHARS OR
     DLGC_WANTTAB;
+END;
+
+PROCEDURE TCodeEditor.WMSysChar(VAR Message: TWMSysChar);
+BEGIN
+  // The WM_SYSCHAR is already posted by TranslateMessage before KeyDown sees the
+  // Alt combo, so a handled Alt shortcut must eat it here or Windows attempts
+  // menu activation (audible beep, focus shift to the menu bar).
+  IF FSuppressSysChar THEN BEGIN
+    FSuppressSysChar := False;
+    Message.Result := 1;
+  END ELSE
+    INHERITED;
 END;
 
 PROCEDURE TCodeEditor.WMHScroll(VAR Message: TWMHScroll);
@@ -4637,8 +4651,13 @@ BEGIN
         Key := 0;
       END;
     Ord('D'):
-      IF ssCtrl IN Shift THEN BEGIN
+      // Alt+D is a two-key alias for hosts where an action owns Ctrl+D (the TOPS
+      // script editors bind Ctrl+D to Reformat). Shift = [ssAlt] excludes AltGr
+      // (ssCtrl+ssAlt), which types a character on some international layouts.
+      IF (ssCtrl IN Shift) OR (Shift = [ssAlt]) THEN BEGIN
         AddNextSelectionOccurrence;
+        IF Shift = [ssAlt] THEN
+          FSuppressSysChar := True; // eat the trailing WM_SYSCHAR (menu beep)
         Key := 0;
       END;
     Ord('L'):
