@@ -1672,6 +1672,23 @@ VAR
   OldOffset         : Integer;
   OffsetDelta       : Integer;
   OldViewport       : TRect;
+
+  PROCEDURE InvalidateBoxFrame(CONST Box: TRect);
+  VAR
+    E               : TRect;
+  BEGIN
+    // The viewport box is a 1px outline on a clear brush - repaint only its
+    // four edges, not the (already-correct) content inside it.
+    E := Rect(Box.Left - 2, Box.Top - 2, Box.Right + 2, Box.Top + 2);
+    Winapi.Windows.InvalidateRect(Handle, @E, False);
+    E := Rect(Box.Left - 2, Box.Bottom - 2, Box.Right + 2, Box.Bottom + 2);
+    Winapi.Windows.InvalidateRect(Handle, @E, False);
+    E := Rect(Box.Left - 2, Box.Top - 2, Box.Left + 2, Box.Bottom + 2);
+    Winapi.Windows.InvalidateRect(Handle, @E, False);
+    E := Rect(Box.Right - 2, Box.Top - 2, Box.Right + 2, Box.Bottom + 2);
+    Winapi.Windows.InvalidateRect(Handle, @E, False);
+  END;
+
 BEGIN
   Delta := FTopLine - OldTopLine;
   IF Delta = 0 THEN
@@ -1711,11 +1728,8 @@ BEGIN
       // moved with the scroll) and draw it at the new position.
       R := OldViewport;
       OffsetRect(R, 0, -OffsetDelta);
-      InflateRect(R, 0, 2);
-      Winapi.Windows.InvalidateRect(Handle, @R, False);
-      R := MinimapViewportRect;
-      InflateRect(R, 0, 2);
-      Winapi.Windows.InvalidateRect(Handle, @R, False);
+      InvalidateBoxFrame(R);
+      InvalidateBoxFrame(MinimapViewportRect);
     END;
   END;
 
