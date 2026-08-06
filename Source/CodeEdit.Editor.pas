@@ -378,6 +378,7 @@ TYPE
     FUNCTION SelectionEnd: TCodePosition;
     FUNCTION RangeStart(CONST Range: TCodeSelectionRange): TCodePosition;
     FUNCTION RangeEnd(CONST Range: TCodeSelectionRange): TCodePosition;
+    FUNCTION OccurrenceAlreadySelected(CONST APos: TCodePosition): Boolean;
     FUNCTION HasMultipleSelections: Boolean;
     FUNCTION ComparePositions(CONST A, B: TCodePosition): Integer;
     FUNCTION SelectedLineStart: Integer;
@@ -3698,6 +3699,8 @@ VAR
   FoundAt           : Integer;
   SearchStart       : Integer;
   ExistingEnd       : TCodePosition;
+  ScannedLines      : Integer;
+  TotalLines        : Integer;
 BEGIN
   IF NOT HasSelection THEN
     SelectWordAtCaret;
@@ -3712,20 +3715,49 @@ BEGIN
   IF HasMultipleSelections THEN
     ExistingEnd := RangeEnd(FSelections[FSelections.Count - 1]);
 
+  // Scan forward from the last selection and wrap past end-of-file back to the
+  // top, skipping occurrences that are already selected; the scan gives up once
+  // every line has been visited (i.e. all occurrences are selected).
   StartPos := ExistingEnd;
-  FOR LineIndex := StartPos.Line TO FLines.Count - 1 DO BEGIN
-    IF LineIndex = StartPos.Line THEN
-      SearchStart := StartPos.Column + 1
-    ELSE
-      SearchStart := 1;
-    FoundAt := PosEx(Needle, FLines[LineIndex], SearchStart);
-    IF FoundAt > 0 THEN BEGIN
-      AddSelectionRange(TCodePosition.Create(LineIndex, FoundAt - 1),
-        TCodePosition.Create(LineIndex, FoundAt - 1 + Length(Needle)));
-      Invalidate;
-      Exit;
-    END;
+  TotalLines := FLines.Count;
+  LineIndex := StartPos.Line;
+  SearchStart := StartPos.Column + 1;
+  ScannedLines := 0;
+  WHILE ScannedLines <= TotalLines DO BEGIN
+    REPEAT
+      FoundAt := PosEx(Needle, FLines[LineIndex], SearchStart);
+      IF FoundAt > 0 THEN BEGIN
+        IF NOT OccurrenceAlreadySelected(TCodePosition.Create(LineIndex, FoundAt - 1)) THEN BEGIN
+          AddSelectionRange(TCodePosition.Create(LineIndex, FoundAt - 1),
+            TCodePosition.Create(LineIndex, FoundAt - 1 + Length(Needle)));
+          Invalidate;
+          Exit;
+        END;
+        SearchStart := FoundAt + 1;
+      END;
+    UNTIL FoundAt = 0;
+    Inc(ScannedLines);
+    Inc(LineIndex);
+    IF LineIndex >= TotalLines THEN
+      LineIndex := 0;
+    SearchStart := 1;
   END;
+END;
+
+FUNCTION TCodeEditor.OccurrenceAlreadySelected(CONST APos: TCodePosition): Boolean;
+VAR
+  I                 : Integer;
+  RS                : TCodePosition;
+BEGIN
+  Result := (SelectionStart.Line = APos.Line) AND (SelectionStart.Column = APos.Column);
+  IF NOT Result AND Assigned(FSelections) THEN
+    FOR I := 0 TO FSelections.Count - 1 DO BEGIN
+      RS := RangeStart(FSelections[I]);
+      IF (RS.Line = APos.Line) AND (RS.Column = APos.Column) THEN BEGIN
+        Result := True;
+        Break;
+      END;
+    END;
 END;
 
 PROCEDURE TCodeEditor.SelectAllOccurrences;
