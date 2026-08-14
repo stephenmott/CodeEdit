@@ -5878,6 +5878,7 @@ VAR
   BracketOpen       : TCodePosition;
   BracketClose      : TCodePosition;
   OccurrenceNeedle  : STRING;
+  SaveIdx           : Integer;
 BEGIN
   R := ClientTextRect;
   ThemeColors := FPaintTheme;
@@ -5890,6 +5891,15 @@ BEGIN
     OccurrenceNeedle := GetSelectedText;
 
   Canvas.Brush.Color := ThemeColors.Background;
+  // Clip every line painter to the text area. Token X is computed as
+  //   X + (Token.Start - 1 - FLeftColumn) * FCharWidth
+  // so once the view is scrolled right, tokens starting left of FLeftColumn get a
+  // NEGATIVE offset and TextOut happily draws them over the gutter (and long lines
+  // over the minimap / styled scrollbars on the right). PaintGutter runs before
+  // PaintText, so without this clip the bleed lands on top of the line numbers.
+  SaveIdx := SaveDC(Canvas.Handle);
+  TRY
+    IntersectClipRect(Canvas.Handle, R.Left, R.Top, R.Right, R.Bottom);
   FOR I := 0 TO VisibleLineCount - 1 DO BEGIN
     LineIndex := FTopLine + I;
     IF LineIndex >= FLines.Count THEN
@@ -5926,6 +5936,10 @@ BEGIN
     IF HaveBracketMatch THEN
       PaintBracketMatchesLine(LineIndex, Y, BracketOpen, BracketClose);
     PaintMultipleCaretsLine(LineIndex, Y);
+  END;
+  FINALLY
+    RestoreDC(Canvas.Handle, SaveIdx);
+    Canvas.Refresh;   // drop TCanvas's cached handle selections after RestoreDC
   END;
 END;
 
