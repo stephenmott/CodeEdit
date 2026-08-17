@@ -366,6 +366,7 @@ TYPE
     FUNCTION StyledHorizontalVisible: Boolean;
     FUNCTION StyledVerticalVisible: Boolean;
     FUNCTION VisibleLineCount: Integer;
+    FUNCTION PaintedLineCount: Integer;
     FUNCTION VisibleColumnCount: Integer;
     FUNCTION CaretToPoint(CONST Position: TCodePosition): TPoint;
     FUNCTION PointToCaret(CONST Point: TPoint): TCodePosition;
@@ -1879,6 +1880,18 @@ END;
 FUNCTION TCodeEditor.VisibleLineCount: Integer;
 BEGIN
   Result := Max(1, ClientTextRect.Height DIV FLineHeight);
+END;
+
+FUNCTION TCodeEditor.PaintedLineCount: Integer;
+BEGIN
+  // Ceiling, where VisibleLineCount floors. The viewport almost never ends on
+  // an exact row boundary, so the last row is partly visible: floor is right
+  // for paging and scroll limits, but the painters MUST cover that partial row.
+  // If they don't, its pixels stay at the background colour, and the next
+  // ScrollWindowEx copies that unpainted sliver up into the middle of the view
+  // where nothing ever repaints it - one chopped-off row every Delta lines,
+  // marching up the page as you wheel down.
+  Result := Max(1, (ClientTextRect.Height + FLineHeight - 1) DIV FLineHeight);
 END;
 
 FUNCTION TCodeEditor.VisibleColumnCount: Integer;
@@ -5826,7 +5839,7 @@ BEGIN
     Canvas.MoveTo(FGutterWidth - 1, 0);
     Canvas.LineTo(FGutterWidth - 1, ClientHeight);
 
-    FOR I := 0 TO VisibleLineCount - 1 DO BEGIN
+    FOR I := 0 TO PaintedLineCount - 1 DO BEGIN
       LineIndex := FTopLine + I;
       IF LineIndex >= FLines.Count THEN
         Break;
@@ -5900,7 +5913,7 @@ BEGIN
   SaveIdx := SaveDC(Canvas.Handle);
   TRY
     IntersectClipRect(Canvas.Handle, R.Left, R.Top, R.Right, R.Bottom);
-  FOR I := 0 TO VisibleLineCount - 1 DO BEGIN
+  FOR I := 0 TO PaintedLineCount - 1 DO BEGIN
     LineIndex := FTopLine + I;
     IF LineIndex >= FLines.Count THEN
       Break;
@@ -6014,7 +6027,11 @@ BEGIN
       IF FLines.Count <= 0 THEN
         Break;
       Y := R.Top + LineIndex * MinimapLineHeight - ScrollOffset;
-      IF Y >= R.Bottom - 2 THEN
+      // Only skip rows that start past the bottom edge. Stopping 2px early left
+      // an unpainted band that the minimap's own ScrollWindowEx then carried up
+      // into the map - the same partial-row problem PaintedLineCount fixes for
+      // the text area. The FillRects below already clamp to R.Bottom.
+      IF Y >= R.Bottom THEN
         Continue;
       LineText := FLines[LineIndex];
 

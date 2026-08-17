@@ -163,6 +163,14 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 - The unimplemented `Options.WordWrap` property was removed.
 
 ### Fixed
+- Wheel scrolling no longer leaves a chopped-off row every few lines. The
+  painters walked `VisibleLineCount` (a floor), so the partly visible bottom
+  row was never drawn; `ScrollWindowEx` then copied that unpainted sliver up
+  into the middle of the view, where it fell outside the invalidated strip and
+  was never repainted. The line painters now use a ceiling count
+  (`PaintedLineCount`), and the minimap paints its last rows instead of
+  stopping 2px short. Only showed at client heights that are not an exact
+  multiple of the line height, which is why it looked window/session specific.
 - Search edit no longer rings the system bell when `Enter` or `Esc` are pressed
   (the `WM_CHAR` is consumed in addition to the `WM_KEYDOWN` handler).
 - Double-click selection is no longer wiped by the follow-up `MouseDown([ssDouble])`
