@@ -58,6 +58,20 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   `Ctrl+mouse wheel`; `ZoomIn` / `ZoomOut` / `ZoomReset` methods for menus.
   Zoom scales the rendered font; the `Font` property itself is untouched.
 
+### Fixed
+- Caret/anchor (and the top line) are clamped back into the document on any
+  change to `Lines`. Replacing the whole text through the `Lines` getter
+  (`Lines.Text := ...`) bypasses `SetLines` and its `NormalizePosition`, so a
+  selection made in the old - longer - text stayed pointing past the end of the
+  new one; `PaintText` asks for `SelectedText` (the occurrence needle) on every
+  repaint, so the stale position raised `EStringListError` again and again and
+  the host application had to be killed. `SelectedText` and `DeleteSelection`
+  normalize their positions too.
+  Editing code must therefore move the caret before writing to `Lines` or wrap
+  the edit in `BeginUpdate`/`EndUpdate`; the Backspace handler now batches its
+  edit (an unbatched write got the caret clamped and then decremented again,
+  leaving it one character too far left).
+
 ## 0.2.0 — 2026-06-10
 
 ### Added

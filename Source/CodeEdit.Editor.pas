@@ -2192,8 +2192,8 @@ BEGIN
   IF NOT HasSelection THEN
     Exit;
 
-  StartPos := SelectionStart;
-  EndPos := SelectionEnd;
+  StartPos := NormalizePosition(SelectionStart);
+  EndPos := NormalizePosition(SelectionEnd);
   IF StartPos.Line = EndPos.Line THEN
     Exit(Copy(FLines[StartPos.Line], StartPos.Column + 1, EndPos.Column - StartPos.Column));
 
@@ -4058,6 +4058,25 @@ BEGIN
     Exit;
   END;
 
+  // Same reason, one step further: external code that replaces the whole
+  // document through the Lines getter (Lines.Text := ...) misses SetLines and
+  // its NormalizePosition, so a caret/anchor left over from the previous - and
+  // possibly longer - text can sit past the end of the new one. Nothing clamps
+  // it later, and the next FLines[..] read from a raw selection position (e.g.
+  // GetSelectedText, which PaintText calls for the occurrence needle) then
+  // raises EStringListError on every repaint. The caret is always inside the
+  // document; re-establish that here, whatever changed the lines.
+  // Consequence for editing code: this also runs on every unbatched FLines
+  // write, so either move the caret BEFORE writing the lines or wrap the edit
+  // in FLines.BeginUpdate/EndUpdate; writing first and moving the caret after
+  // gets it clamped and then moved again (the Backspace double-step bug).
+  FCaret := NormalizePosition(FCaret);
+  FAnchor := NormalizePosition(FAnchor);
+  // FLineHeight is still 0 while the constructor's FLines.Add('') fires this,
+  // and VisibleLineCount divides by it.
+  IF (FTopLine > 0) AND (FLineHeight > 0) THEN
+    FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
+
   FMaxLineLengthValid := False;
   FDesiredColumn := -1;
   // We don't know which line changed, so restart state validation from the
@@ -4320,8 +4339,8 @@ BEGIN
   IF NOT HasSelection THEN
     Exit;
 
-  StartPos := SelectionStart;
-  EndPos := SelectionEnd;
+  StartPos := NormalizePosition(SelectionStart);
+  EndPos := NormalizePosition(SelectionEnd);
   Prefix := Copy(FLines[StartPos.Line], 1, StartPos.Column);
   Suffix := Copy(FLines[EndPos.Line], EndPos.Column + 1, MaxInt);
 
@@ -5103,24 +5122,34 @@ BEGIN
         END;
         FinishUndoGroup;
         UndoItem := CaptureUndoState;
-        IF HasSelection THEN
-          DeleteSelection
-        ELSE IF FCaret.Column > 0 THEN BEGIN
-          Line := FLines[FCaret.Line];
-          Delete(Line, FCaret.Column, 1);
-          FLines[FCaret.Line] := Line;
-          Dec(FCaret.Column);
-          FAnchor := FCaret;
-        END ELSE IF FCaret.Line > 0 THEN BEGIN
-          FCaret.Column := Length(FLines[FCaret.Line - 1]);
-          FLines[FCaret.Line - 1] := FLines[FCaret.Line - 1] + FLines[FCaret.Line];
-          FLines.Delete(FCaret.Line);
-          ShiftBreakpoints(FCaret.Line, -1);
-          ShiftLineMarkers(FCaret.Line, -1);
-          Dec(FCaret.Line);
-          FAnchor := FCaret;
+        // Batch the edit: the line store fires LinesChanged on every write,
+        // and LinesChanged clamps the caret into the (now shorter) line. The
+        // caret is moved after the write here, so an unbatched write clamps
+        // it once and the Dec below then steps it back a second character
+        // ("hellod" -> Backspace -> "hell|o"). EndUpdate fires LinesChanged
+        // once, when the caret already matches the text.
+        FLines.BeginUpdate;
+        TRY
+          IF HasSelection THEN
+            DeleteSelection
+          ELSE IF FCaret.Column > 0 THEN BEGIN
+            Line := FLines[FCaret.Line];
+            Delete(Line, FCaret.Column, 1);
+            FLines[FCaret.Line] := Line;
+            Dec(FCaret.Column);
+            FAnchor := FCaret;
+          END ELSE IF FCaret.Line > 0 THEN BEGIN
+            FCaret.Column := Length(FLines[FCaret.Line - 1]);
+            FLines[FCaret.Line - 1] := FLines[FCaret.Line - 1] + FLines[FCaret.Line];
+            FLines.Delete(FCaret.Line);
+            ShiftBreakpoints(FCaret.Line, -1);
+            ShiftLineMarkers(FCaret.Line, -1);
+            Dec(FCaret.Line);
+            FAnchor := FCaret;
+          END;
+        FINALLY
+          FLines.EndUpdate;                 // fires LinesChanged once
         END;
-        LinesChanged(Self);
         EnsureCaretVisible;
         CommitUndoState(UndoItem);
         Key := #0;
