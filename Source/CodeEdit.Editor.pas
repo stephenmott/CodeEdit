@@ -606,6 +606,17 @@ TYPE
     PROCEDURE RemoveLineMarker(Line: Integer; Kind: TCodeLineMarkerKind);
     PROCEDURE ClearLineMarkers;
     PROCEDURE ShowLine(Line: Integer);
+    // Line (0-based) that opens the body of the routine whose header is at
+    // HeaderLine: the first line at or after it starting with BodyKeyword at
+    // the header's own indentation, which skips var/const/type sections and
+    // the bodies of nested local routines. Falls back to the first such line
+    // at any indent, then to HeaderLine itself; -1 if HeaderLine is invalid.
+    FUNCTION FindRoutineBodyLine(HeaderLine: Integer; CONST BodyKeyword: STRING = 'begin'):
+      Integer;
+    // Puts the caret on the first line of that routine's body (the line after
+    // its BEGIN, at the first non-blank column) and scrolls so the header is
+    // still on screen above it whenever the two fit. Returns the caret line.
+    FUNCTION GotoRoutineBody(HeaderLine: Integer; CONST BodyKeyword: STRING = 'begin'): Integer;
     FUNCTION HasBreakpoint(Line: Integer): Boolean;
     FUNCTION BreakpointLines: TArray<Integer>;
     PROPERTY CanUndoAction: Boolean READ CanUndo;
@@ -4344,6 +4355,101 @@ END;
 PROCEDURE TCodeEditor.ShowLine(Line: Integer);
 BEGIN
   SetTopLine(Line);
+END;
+
+FUNCTION TCodeEditor.FindRoutineBodyLine(HeaderLine: Integer; CONST BodyKeyword: STRING):
+  Integer;
+VAR
+  HeaderIndent      : Integer;
+  I                 : Integer;
+  AnyIndent         : Integer;
+  TabSize           : Integer;
+
+  FUNCTION IndentOf(CONST S: STRING): Integer;
+  VAR
+    P               : Integer;
+  BEGIN
+    Result := 0;
+    FOR P := 1 TO Length(S) DO
+      CASE S[P] OF
+        ' ': Inc(Result);
+        #9: Inc(Result, TabSize);
+      ELSE
+        Break;
+      END;
+  END;
+
+  // True when the trimmed line starts with Word as a whole word.
+  FUNCTION StartsWithWord(CONST S, Word: STRING): Boolean;
+  VAR
+    T             : STRING;
+    L             : Integer;
+  BEGIN
+    T := TrimLeft(S);
+    L := Length(Word);
+    Result := (L > 0) AND (Length(T) >= L) AND SameText(Copy(T, 1, L), Word) AND
+      ((Length(T) = L) OR NOT IsWordChar(T[L + 1]));
+  END;
+
+  // Another routine header at the same level: the one we were given has no
+  // body of its own (forward / external), stop rather than run into it.
+  FUNCTION IsSiblingHeader(CONST S: STRING): Boolean;
+  BEGIN
+    Result := StartsWithWord(S, 'procedure') OR StartsWithWord(S, 'function') OR
+      StartsWithWord(S, 'constructor') OR StartsWithWord(S, 'destructor') OR
+      StartsWithWord(S, 'class');
+  END;
+
+BEGIN
+  Result := -1;
+  IF (HeaderLine < 0) OR (HeaderLine >= FLines.Count) OR (BodyKeyword = '') THEN
+    Exit;
+
+  TabSize := Max(1, FOptions.TabSize);
+  HeaderIndent := IndentOf(FLines[HeaderLine]);
+  AnyIndent := -1;
+  FOR I := HeaderLine + 1 TO FLines.Count - 1 DO BEGIN
+    IF StartsWithWord(FLines[I], BodyKeyword) THEN BEGIN
+      IF IndentOf(FLines[I]) <= HeaderIndent THEN
+        Exit(I);
+      IF AnyIndent < 0 THEN
+        AnyIndent := I;                       // nested routine's body, remembered as a fallback
+    END ELSE IF (IndentOf(FLines[I]) <= HeaderIndent) AND IsSiblingHeader(FLines[I]) THEN
+      Break;
+  END;
+  IF AnyIndent >= 0 THEN
+    Result := AnyIndent
+  ELSE
+    Result := HeaderLine;
+END;
+
+FUNCTION TCodeEditor.GotoRoutineBody(HeaderLine: Integer; CONST BodyKeyword: STRING): Integer;
+VAR
+  BodyLine          : Integer;
+  Target            : Integer;
+  LineText          : STRING;
+  NewTop            : Integer;
+BEGIN
+  Result := -1;
+  BodyLine := FindRoutineBodyLine(HeaderLine, BodyKeyword);
+  IF BodyLine < 0 THEN
+    Exit;
+
+  // The line after the opening keyword is the first statement; if the keyword
+  // was not found we stay on the header itself.
+  Target := BodyLine;
+  IF (BodyLine > HeaderLine) AND (BodyLine + 1 < FLines.Count) THEN
+    Inc(Target);
+  LineText := FLines[Target];
+  SetCaret(TCodePosition.Create(Target, Length(LineText) - Length(TrimLeft(LineText))));
+
+  // SetCaret leaves about a quarter of a view above the caret, which a long
+  // var/const section can exceed. Pull the view up so the header shows with a
+  // couple of rows above it, unless that would push the caret off the bottom.
+  NewTop := Max(0, HeaderLine - CaretJumpMinContextRows);
+  IF FTopLine > NewTop THEN
+    SetTopLine(Max(NewTop, Target - VisibleLineCount + 1));
+  Result := Target;
 END;
 
 PROCEDURE TCodeEditor.CommentSelection;

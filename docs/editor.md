@@ -101,6 +101,14 @@ apply at every caret.
 [Completion](completion.md).
 
 **Navigation** — `ShowLine(Line)` (0-based, alias for `TopLine`).
+`GotoRoutineBody(HeaderLine, BodyKeyword = 'begin')` is for procedure lists
+and the like: given the 0-based line of a routine header it puts the caret on
+the first line of the body (the line after the routine's own `BEGIN`, past any
+`var`/`const` sections and nested local routines, at the first non-blank
+column) and scrolls so the header stays on screen above it whenever both fit.
+Returns the caret line. `FindRoutineBodyLine` is the search on its own: the
+first line after the header that starts with `BodyKeyword` at the header's
+indentation, falling back to any indentation, then to the header itself.
 
 **Zoom** — `ZoomIn` / `ZoomOut` step the published `Zoom` percentage by 10,
 `ZoomReset` returns to 100. `Font` is never modified — the zoom scales the

@@ -6,6 +6,11 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- `GotoRoutineBody(HeaderLine)` / `FindRoutineBodyLine(HeaderLine)`: from a
+  routine's header line, find its own `BEGIN` (skipping `var`/`const`
+  sections and nested local routines by indentation), put the caret on the
+  line after it and scroll so the header is still visible above. For
+  procedure-list navigation; the ScrEdit sample uses it.
 - Minimap hover preview (`Options.MinimapPreview`, default on): resting the
   mouse over the minimap pops up a full-size, syntax-coloured preview of the
   seven lines around the one under the mouse (hovered line highlighted in the
