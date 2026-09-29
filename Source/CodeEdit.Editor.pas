@@ -67,6 +67,7 @@ TYPE
     FBracketMatching: Boolean;
     FLineCommentPrefix: STRING;
     FShowMinimap: Boolean;
+    FMinimapPreview: Boolean;
     FMaxPasteBytes: Integer;
     FThemeSyntaxColors: Boolean;
     FShowGutter: Boolean;
@@ -76,6 +77,7 @@ TYPE
     PROCEDURE SetLineCommentPrefix(CONST Value: STRING);
     PROCEDURE SetMaxPasteBytes(Value: Integer);
     PROCEDURE SetShowMinimap(Value: Boolean);
+    PROCEDURE SetMinimapPreview(Value: Boolean);
     PROCEDURE SetThemeSyntaxColors(Value: Boolean);
     PROCEDURE SetShowGutter(Value: Boolean);
     PROCEDURE SetTabSize(Value: Integer);
@@ -90,6 +92,9 @@ TYPE
     PROPERTY MaxPasteBytes: Integer READ FMaxPasteBytes WRITE SetMaxPasteBytes DEFAULT 67108864;
     PROPERTY ShowGutter: Boolean READ FShowGutter WRITE SetShowGutter DEFAULT True;
     PROPERTY ShowMinimap: Boolean READ FShowMinimap WRITE SetShowMinimap DEFAULT False;
+    // Hovering the minimap pops up a full-size preview of the lines under the
+    // mouse (the hovered line in the middle); clicking jumps the caret there.
+    PROPERTY MinimapPreview: Boolean READ FMinimapPreview WRITE SetMinimapPreview DEFAULT True;
     PROPERTY TabSize: Integer READ FTabSize WRITE SetTabSize DEFAULT 2;
     PROPERTY ThemeSyntaxColors: Boolean READ FThemeSyntaxColors WRITE SetThemeSyntaxColors DEFAULT
       True;
@@ -155,6 +160,7 @@ TYPE
     CONST AWord: STRING; VAR HintText: STRING) OF OBJECT;
 
   TCodeEditor = CLASS;
+  TCodeMinimapPreviewWindow = CLASS;
 
   TCodeEditorCommand = (
     eccUndo,
@@ -299,6 +305,12 @@ TYPE
     FScrollBarDragging: Boolean;
     FHScrollBarDragging: Boolean;
     FMinimapDragging: Boolean;
+    FMinimapDownY: Integer;
+    FMinimapDownLine: Integer;
+    FMinimapPreview: TCodeMinimapPreviewWindow;
+    FMinimapPreviewTimer: TTimer;
+    FMinimapPreviewLine: Integer;
+    FMinimapPreviewMouse: TPoint;
     FScrollDragOffset: Integer;
     FSelections: TList<TCodeSelectionRange>;
     FSuppressKeyPress: Boolean;
@@ -358,6 +370,10 @@ TYPE
     FUNCTION MinimapScrollOffset: Integer;
     FUNCTION MinimapViewportRect: TRect;
     PROCEDURE ScrollMinimapTo(Y: Integer);
+    FUNCTION MinimapLineAtY(Y: Integer): Integer;
+    PROCEDURE MinimapPreviewTimerFired(Sender: TObject);
+    PROCEDURE ShowMinimapPreview(Line, MouseY: Integer);
+    PROCEDURE HideMinimapPreview;
     FUNCTION StyledVerticalScrollRect: TRect;
     FUNCTION StyledVerticalThumbRect: TRect;
     FUNCTION StyledHorizontalScrollRect: TRect;
@@ -527,6 +543,8 @@ TYPE
     PROCEDURE PaintLineTokens(ALineIndex, X, Y: Integer; CONST LineText: STRING; ForcedColor:
       TColor);
     PROCEDURE PaintSelectedTextLine(ALineIndex, X, Y: Integer; CONST LineText: STRING);
+    PROCEDURE PaintLineTokensTo(ACanvas: TCanvas; ALineIndex, X, Y: Integer;
+      CONST LineText: STRING; CONST Colors: TCodeEditorThemeColors);
     PROCEDURE CMFontChanged(VAR Message: TMessage); MESSAGE CM_FONTCHANGED;
     PROCEDURE CMStyleChanged(VAR Message: TMessage); MESSAGE CM_STYLECHANGED;
     PROCEDURE CMMouseLeave(VAR Message: TMessage); MESSAGE CM_MOUSELEAVE;
@@ -656,6 +674,23 @@ TYPE
     PROPERTY OnGetHint: TCodeEditorHintEvent READ FOnGetHint WRITE FOnGetHint;
   END;
 
+  // Popup shown while the mouse hovers the minimap: a full-size, syntax-colored
+  // rendering of MinimapPreviewLines lines centred on the hovered line. It is a
+  // THintWindow so it never takes focus or activation away from the editor.
+  TCodeMinimapPreviewWindow = CLASS(THintWindow)
+  PRIVATE
+    FEditor: TCodeEditor;
+    FFirstLine: Integer;          // 0-based first line drawn
+    FHoverLine: Integer;          // 0-based hovered (highlighted) line
+    FGutterWidth: Integer;
+  PROTECTED
+    PROCEDURE CreateParams(VAR Params: TCreateParams); OVERRIDE;
+    PROCEDURE Paint; OVERRIDE;
+  PUBLIC
+    PROCEDURE ShowPreview(AEditor: TCodeEditor; CONST AScreenRect: TRect; AFirstLine,
+      AHoverLine, AGutterWidth: Integer);
+  END;
+
 IMPLEMENTATION
 
 USES
@@ -673,6 +708,10 @@ CONST
   MinimapWidth      = 192;
   MinimapGap        = 4;
   MinimapLineHeight = 4;
+  MinimapPreviewLines = 7;          // rows in the hover preview; hovered row sits in the middle
+  MinimapPreviewMaxCols = 100;      // preview width cap, in character cells
+  MinimapPreviewPad = 4;            // inner padding of the preview window
+  MinimapPreviewDelayMs = 120;      // dwell before the preview first appears
   StyledScrollBarSize = 12;
   DefaultMaxPasteBytes = 64 * 1024 * 1024;
   MinZoomPercent    = 25;
@@ -780,6 +819,7 @@ BEGIN
   FLineCommentPrefix := '//';
   FShowGutter := True;
   FShowMinimap := False;
+  FMinimapPreview := True;
   FMaxPasteBytes := DefaultMaxPasteBytes;
   FThemeSyntaxColors := True;
   FTabSize := 2;
@@ -798,6 +838,7 @@ BEGIN
     FLineCommentPrefix := TCodeEditorOptions(Source).LineCommentPrefix;
     FShowGutter := TCodeEditorOptions(Source).ShowGutter;
     FShowMinimap := TCodeEditorOptions(Source).ShowMinimap;
+    FMinimapPreview := TCodeEditorOptions(Source).MinimapPreview;
     FMaxPasteBytes := TCodeEditorOptions(Source).MaxPasteBytes;
     FTabSize := TCodeEditorOptions(Source).TabSize;
     FThemeSyntaxColors := TCodeEditorOptions(Source).ThemeSyntaxColors;
@@ -843,6 +884,14 @@ PROCEDURE TCodeEditorOptions.SetShowMinimap(Value: Boolean);
 BEGIN
   IF FShowMinimap <> Value THEN BEGIN
     FShowMinimap := Value;
+    Changed;
+  END;
+END;
+
+PROCEDURE TCodeEditorOptions.SetMinimapPreview(Value: Boolean);
+BEGIN
+  IF FMinimapPreview <> Value THEN BEGIN
+    FMinimapPreview := Value;
     Changed;
   END;
 END;
@@ -1170,6 +1219,12 @@ BEGIN
   FHoverTimer.Interval := 450;
   FHoverTimer.OnTimer := HoverTimerFired;
 
+  FMinimapPreviewLine := -1;
+  FMinimapPreviewTimer := TTimer.Create(Self);
+  FMinimapPreviewTimer.Enabled := False;
+  FMinimapPreviewTimer.Interval := MinimapPreviewDelayMs;
+  FMinimapPreviewTimer.OnTimer := MinimapPreviewTimerFired;
+
   Font.Name := 'Consolas';
   Font.Size := 10;
   UpdateMetrics;
@@ -1184,6 +1239,8 @@ BEGIN
   HideSignatureHelp;
   HideTemplates;
   HideHoverHint;
+  HideMinimapPreview;
+  FMinimapPreview.Free;
   FHintWindow.Free;
   FCompletionForm.Free;
   FCompletionItems.Free;
@@ -1333,6 +1390,7 @@ PROCEDURE TCodeEditor.WMKillFocus(VAR Message: TWMKillFocus);
 BEGIN
   HideCaret(Handle);
   HideHoverHint;
+  HideMinimapPreview;
   // Don't hide the popups when focus merely bounces back to the editor itself (which happens
   // during the popup Show + SetFocus sequence) or moves onto one of the popup windows.
   IF (Message.FocusedWnd <> Handle) AND (NOT WindowInPopups(Message.FocusedWnd)) THEN BEGIN
@@ -1362,6 +1420,9 @@ BEGIN
   HideSignatureHelp;
   HideTemplates;
   HideHoverHint;
+  // The wheel scrolls the map under a resting mouse, so the preview would show
+  // stale lines; it comes back on the next mouse move.
+  HideMinimapPreview;
   IF (Message.Keys AND MK_CONTROL) <> 0 THEN BEGIN
     IF Message.WheelDelta > 0 THEN
       ZoomIn
@@ -1661,6 +1722,105 @@ BEGIN
   UpdateScrollBars;
   UpdateCaret;
   ScrollViewport(OldTop);
+END;
+
+// 0-based document line under minimap client Y, or -1 when Y is below the
+// last mapped row (so the empty tail of a short file previews nothing).
+FUNCTION TCodeEditor.MinimapLineAtY(Y: Integer): Integer;
+VAR
+  R                 : TRect;
+BEGIN
+  Result := -1;
+  R := MinimapRect;
+  IF (R.Height <= 0) OR (FLines.Count <= 0) THEN
+    Exit;
+  Result := (MinimapScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapLineHeight;
+  IF Result >= FLines.Count THEN
+    Result := -1;
+END;
+
+PROCEDURE TCodeEditor.MinimapPreviewTimerFired(Sender: TObject);
+VAR
+  P                 : TPoint;
+BEGIN
+  FMinimapPreviewTimer.Enabled := False;
+  // Leaving the map (MouseMove elsewhere / CM_MOUSELEAVE) stops this timer, so
+  // the last hover point is still the current one.
+  P := FMinimapPreviewMouse;
+  IF NOT (Assigned(FOptions) AND FOptions.MinimapPreview AND MinimapVisible AND
+    PtInRect(MinimapRect, P)) THEN
+    Exit;
+  ShowMinimapPreview(MinimapLineAtY(P.Y), P.Y);
+END;
+
+PROCEDURE TCodeEditor.ShowMinimapPreview(Line, MouseY: Integer);
+VAR
+  FirstLine         : Integer;
+  HoverRow          : Integer;
+  Rows              : Integer;
+  GutterW           : Integer;
+  PreviewW          : Integer;
+  PreviewH          : Integer;
+  MapR              : TRect;
+  R                 : TRect;
+  Work              : TRect;
+  Origin            : TPoint;
+  Monitor           : TMonitor;
+BEGIN
+  IF (Line < 0) OR (Line >= FLines.Count) OR NOT MinimapVisible THEN BEGIN
+    HideMinimapPreview;
+    Exit;
+  END;
+  // Don't fight the other popups for screen space.
+  IF CompletionVisible OR SignatureVisible OR TemplatesVisible THEN
+    Exit;
+
+  // The hovered line sits in the middle row, except at the ends of the
+  // document where the window is clamped to real lines.
+  FirstLine := Line - MinimapPreviewLines DIV 2;
+  FirstLine := EnsureRange(FirstLine, 0, Max(0, FLines.Count - MinimapPreviewLines));
+  HoverRow := Line - FirstLine;
+  Rows := Min(MinimapPreviewLines, FLines.Count - FirstLine);   // short files: fewer rows
+
+  GutterW := 0;
+  IF FOptions.ShowGutter THEN
+    GutterW := FCharWidth * Length(IntToStr(FLines.Count)) + 12;
+
+  PreviewW := Min(ClientTextRect.Width, MinimapPreviewMaxCols * FCharWidth) + GutterW +
+    2 * MinimapPreviewPad + 2;
+  PreviewW := Max(PreviewW, 160);
+  PreviewH := Rows * FLineHeight + 2 * MinimapPreviewPad + 2;
+
+  // Sit just left of the map with the hovered row level with the mouse.
+  MapR := MinimapRect;
+  Origin := ClientToScreen(Point(MapR.Left - MinimapGap - PreviewW,
+    MouseY - (HoverRow * FLineHeight + FLineHeight DIV 2) - MinimapPreviewPad - 1));
+  R := Rect(Origin.X, Origin.Y, Origin.X + PreviewW, Origin.Y + PreviewH);
+
+  Monitor := Screen.MonitorFromPoint(ClientToScreen(Point(MapR.Left, MouseY)));
+  IF Assigned(Monitor) THEN BEGIN
+    Work := Monitor.WorkareaRect;
+    IF R.Bottom > Work.Bottom THEN
+      OffsetRect(R, 0, Work.Bottom - R.Bottom);
+    IF R.Top < Work.Top THEN
+      OffsetRect(R, 0, Work.Top - R.Top);
+    IF R.Left < Work.Left THEN
+      R.Left := Work.Left;
+  END;
+
+  IF FMinimapPreview = NIL THEN
+    FMinimapPreview := TCodeMinimapPreviewWindow.Create(Self);
+  FMinimapPreviewLine := Line;
+  FMinimapPreview.ShowPreview(Self, R, FirstLine, Line, GutterW);
+END;
+
+PROCEDURE TCodeEditor.HideMinimapPreview;
+BEGIN
+  IF Assigned(FMinimapPreviewTimer) THEN
+    FMinimapPreviewTimer.Enabled := False;
+  FMinimapPreviewLine := -1;
+  IF Assigned(FMinimapPreview) AND FMinimapPreview.HandleAllocated THEN
+    FMinimapPreview.ReleaseHandle;
 END;
 
 PROCEDURE TCodeEditor.ScrollViewport(OldTopLine: Integer);
@@ -4826,6 +4986,7 @@ VAR
 BEGIN
   INHERITED;
   HideHoverHint;
+  HideMinimapPreview;
 
   IF CompletionVisible THEN BEGIN
     CASE Key OF
@@ -5213,12 +5374,20 @@ VAR
 BEGIN
   INHERITED;
   HideHoverHint;
+  HideMinimapPreview;
   IF Button = mbLeft THEN BEGIN
     SetFocus;
     HideCompletion;
     HideTemplates;
     IF MinimapVisible AND PtInRect(MinimapRect, Point(X, Y)) THEN BEGIN
+      // Remember where the press landed: a click (no drag, see MouseUp) jumps
+      // the caret to that line. Read the line before scrolling - the map
+      // offset shifts with the viewport.
       FMinimapDragging := True;
+      FMinimapDownY := Y;
+      FMinimapDownLine := MinimapLineAtY(Y);
+      IF FMinimapDownLine < 0 THEN
+        FMinimapDownLine := FLines.Count - 1;   // below the map: the last line
       ScrollMinimapTo(Y);
       Exit;
     END;
@@ -5311,6 +5480,29 @@ BEGIN
     Exit;
   END;
 
+  // Hovering the minimap (no button down): preview the lines under the mouse.
+  IF (Shift * [ssLeft, ssRight, ssMiddle] = []) AND Assigned(FOptions) AND
+    FOptions.MinimapPreview AND MinimapVisible AND PtInRect(MinimapRect, Point(X, Y)) THEN BEGIN
+    HideHoverHint;
+    FMinimapPreviewMouse := Point(X, Y);
+    NewPos := MinimapLineAtY(Y);
+    IF NewPos < 0 THEN
+      HideMinimapPreview           // below the last mapped row
+    ELSE IF Assigned(FMinimapPreview) AND FMinimapPreview.HandleAllocated AND
+      IsWindowVisible(FMinimapPreview.Handle) THEN BEGIN
+      // Already up: track the mouse straight away.
+      IF NewPos <> FMinimapPreviewLine THEN
+        ShowMinimapPreview(NewPos, Y);
+    END ELSE BEGIN
+      // Not up yet: a short dwell so merely crossing the map on the way to
+      // the scrollbar doesn't flash the preview.
+      FMinimapPreviewTimer.Enabled := False;
+      FMinimapPreviewTimer.Enabled := True;
+    END;
+    Exit;
+  END;
+  HideMinimapPreview;
+
   IF FHScrollBarDragging THEN BEGIN
     Track := StyledHorizontalScrollRect;
     Thumb := StyledHorizontalThumbRect;
@@ -5350,7 +5542,14 @@ BEGIN
   INHERITED;
   FScrollBarDragging := False;
   FHScrollBarDragging := False;
-  FMinimapDragging := False;
+  IF FMinimapDragging THEN BEGIN
+    FMinimapDragging := False;
+    // A press-and-release without a drag is a click: go to the line that was
+    // under the mouse. Drags keep the old behaviour of scrolling only.
+    IF (Button = mbLeft) AND (Abs(Y - FMinimapDownY) < MinimapLineHeight) AND
+      (FMinimapDownLine >= 0) AND (FMinimapDownLine < FLines.Count) THEN
+      MoveCaret(TCodePosition.Create(FMinimapDownLine, 0), []);
+  END;
 END;
 
 PROCEDURE TCodeEditor.SelectWordAtCaret;
@@ -5723,6 +5922,7 @@ PROCEDURE TCodeEditor.CMMouseLeave(VAR Message: TMessage);
 BEGIN
   INHERITED;
   HideHoverHint;
+  HideMinimapPreview;
   FHoverMouse := Point(-1, -1);
 END;
 
@@ -6383,6 +6583,37 @@ BEGIN
   Canvas.Font.Style := Font.Style;
 END;
 
+// PaintLineTokens for another canvas (the minimap preview): same token
+// colouring, but unscrolled (column 0 at X) and with the caller's theme.
+PROCEDURE TCodeEditor.PaintLineTokensTo(ACanvas: TCanvas; ALineIndex, X, Y: Integer;
+  CONST LineText: STRING; CONST Colors: TCodeEditorThemeColors);
+VAR
+  Tokens            : TCodeTokenArray;
+  Token             : TCodeToken;
+  Style             : TCodeTextStyle;
+  Text              : STRING;
+BEGIN
+  ACanvas.Brush.Style := bsClear;
+  IF NOT Assigned(FHighlighter) THEN BEGIN
+    ACanvas.Font.Color := Colors.Text;
+    ACanvas.Font.Style := Font.Style;
+    ACanvas.TextOut(X, Y, LineText);
+  END ELSE BEGIN
+    Tokens := LineTokens(ALineIndex);
+    FOR Token IN Tokens DO BEGIN
+      Text := Copy(LineText, Token.Start, Token.Length);
+      Style := FHighlighter.Styles[Token.Kind];
+      IF FOptions.ThemeSyntaxColors THEN
+        Style := TokenStyleForTheme(Token.Kind, Style, Colors);
+      ACanvas.Font.Color := Style.Foreground;
+      ACanvas.Font.Style := Style.FontStyle;
+      ACanvas.TextOut(X + (Token.Start - 1) * FCharWidth, Y, Text);
+    END;
+  END;
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Font.Style := Font.Style;
+END;
+
 PROCEDURE TCodeEditor.PaintSelectedTextLine(ALineIndex, X, Y: Integer; CONST LineText: STRING);
 VAR
   R                 : TRect;
@@ -6436,6 +6667,113 @@ BEGIN
   IF HasMultipleSelections THEN
     FOR Range IN FSelections DO
       PaintRange(RangeStart(Range), RangeEnd(Range));
+END;
+
+{ TCodeMinimapPreviewWindow }
+
+PROCEDURE TCodeMinimapPreviewWindow.CreateParams(VAR Params: TCreateParams);
+BEGIN
+  INHERITED;
+  // The hint window's own frame is a light system border; the preview draws a
+  // theme-coloured border itself so it sits well on dark themes too.
+  Params.Style := Params.Style AND NOT WS_BORDER;
+END;
+
+PROCEDURE TCodeMinimapPreviewWindow.ShowPreview(AEditor: TCodeEditor; CONST AScreenRect: TRect;
+  AFirstLine, AHoverLine, AGutterWidth: Integer);
+BEGIN
+  FEditor := AEditor;
+  FFirstLine := AFirstLine;
+  FHoverLine := AHoverLine;
+  FGutterWidth := AGutterWidth;
+  // Bypass ActivateHint: it pads the rect and re-clamps to the primary
+  // desktop; the editor has already placed the window on the right monitor.
+  HandleNeeded;
+  SetWindowPos(Handle, HWND_TOPMOST, AScreenRect.Left, AScreenRect.Top, AScreenRect.Width,
+    AScreenRect.Height, SWP_SHOWWINDOW OR SWP_NOACTIVATE);
+  Invalidate;
+END;
+
+PROCEDURE TCodeMinimapPreviewWindow.Paint;
+VAR
+  Colors            : TCodeEditorThemeColors;
+  R                 : TRect;
+  I                 : Integer;
+  LineIndex         : Integer;
+  LineHeight        : Integer;
+  X                 : Integer;
+  Y                 : Integer;
+  Text              : STRING;
+  LineText          : STRING;
+  SaveIdx           : Integer;
+BEGIN
+  IF NOT Assigned(FEditor) THEN
+    Exit;
+
+  Colors := FEditor.ActiveTheme;
+  TRY
+    R := ClientRect;
+    LineHeight := FEditor.FLineHeight;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := Colors.Background;
+    Canvas.FillRect(R);
+    Canvas.Font.Assign(FEditor.Font);
+    Canvas.Font.Size := FEditor.ScaledFontSize;
+
+    IF FGutterWidth > 0 THEN BEGIN
+      Canvas.Brush.Color := Colors.GutterBackground;
+      Canvas.FillRect(Rect(R.Left + 1, R.Top + 1, R.Left + 1 + FGutterWidth, R.Bottom - 1));
+      Canvas.Pen.Color := Colors.GutterBorder;
+      Canvas.MoveTo(R.Left + FGutterWidth, R.Top + 1);
+      Canvas.LineTo(R.Left + FGutterWidth, R.Bottom - 1);
+    END;
+    X := R.Left + 1 + FGutterWidth + MinimapPreviewPad;
+
+    FOR I := 0 TO MinimapPreviewLines - 1 DO BEGIN
+      LineIndex := FFirstLine + I;
+      IF (LineIndex < 0) OR (LineIndex >= FEditor.FLines.Count) THEN
+        Break;
+      Y := R.Top + 1 + MinimapPreviewPad + I * LineHeight;
+
+      // Same tint the editor uses for the execution line: the hovered row is
+      // the one a click will jump to.
+      IF LineIndex = FHoverLine THEN BEGIN
+        IF FEditor.IsDarkTheme(Colors) THEN
+          Canvas.Brush.Color := ShiftBrightness(Colors.Background, 28)
+        ELSE
+          Canvas.Brush.Color := ShiftBrightness(Colors.Background, -22);
+        Canvas.FillRect(Rect(R.Left + 1 + FGutterWidth, Y, R.Right - 1, Y + LineHeight));
+      END;
+
+      IF FGutterWidth > 0 THEN BEGIN
+        Canvas.Brush.Style := bsClear;
+        Canvas.Font.Color := Colors.GutterText;
+        Canvas.Font.Style := FEditor.Font.Style;
+        Text := IntToStr(LineIndex + 1);
+        Canvas.TextOut(R.Left + 1 + FGutterWidth - Canvas.TextWidth(Text) - 6, Y + 1, Text);
+        Canvas.Brush.Style := bsSolid;
+      END;
+
+      LineText := FEditor.FLines[LineIndex];
+      IF Pos(#9, LineText) > 0 THEN
+        LineText := StringReplace(LineText, #9, ' ', [rfReplaceAll]);
+      SaveIdx := SaveDC(Canvas.Handle);
+      TRY
+        IntersectClipRect(Canvas.Handle, X, Y, R.Right - 1, Y + LineHeight);
+        FEditor.PaintLineTokensTo(Canvas, LineIndex, X, Y + 1, LineText, Colors);
+      FINALLY
+        RestoreDC(Canvas.Handle, SaveIdx);
+        Canvas.Refresh;
+      END;
+    END;
+
+    Canvas.Brush.Style := bsClear;
+    Canvas.Pen.Color := Colors.GutterBorder;
+    Canvas.Rectangle(R);
+    Canvas.Brush.Style := bsSolid;
+  FINALLY
+    Colors.Free;
+  END;
 END;
 
 END.

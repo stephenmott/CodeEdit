@@ -58,7 +58,8 @@ fixed-pitch font — caret math is one column per character cell.
 | `LineCommentPrefix` | `'//'` | Prefix used by `ToggleLineComment` / `CommentSelection` / `UncommentSelection`. Set per language (`'--'` for SQL, `'#'` for Python…). |
 | `MaxPasteBytes` | 64 MB | Refuse larger text pastes (with a warning beep) before the VCL materialises the clipboard text. `0` disables the guard. |
 | `ShowGutter` | `True` | Line-number gutter incl. breakpoint margin. |
-| `ShowMinimap` | `False` | VS Code-style file map on the right; click or drag it to scroll. |
+| `ShowMinimap` | `False` | VS Code-style file map on the right; drag it to scroll, click it to jump the caret to that line. |
+| `MinimapPreview` | `True` | Hovering the minimap pops up a full-size, syntax-coloured preview of 7 lines around the one under the mouse (that line is highlighted, in the middle). Clicking goes to it. |
 | `TabSize` | `2` | Number of spaces the Tab key inserts, and the indent unit for `IndentSelection` / `UnindentSelection`. |
 | `ThemeSyntaxColors` | `True` | Re-map token colors to theme-appropriate palettes (separate dark/light sets) instead of using the highlighter's raw `Styles[]`. |
 

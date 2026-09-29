@@ -6,6 +6,12 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Minimap hover preview (`Options.MinimapPreview`, default on): resting the
+  mouse over the minimap pops up a full-size, syntax-coloured preview of the
+  seven lines around the one under the mouse (hovered line highlighted in the
+  middle, line numbers in a gutter), tracking the mouse as it moves. Clicking
+  the minimap now jumps the caret to that line as well as scrolling to it;
+  dragging still just scrolls.
 - `OnGetHint` event: hover-to-evaluate. After the mouse rests over an
   identifier the editor fires `OnGetHint(Line, Column, AWord, var HintText)`
   (1-based position; `AWord` is the identifier, including dotted `a.b.c`
