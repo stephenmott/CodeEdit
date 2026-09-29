@@ -712,6 +712,8 @@ CONST
   MinimapPreviewMaxCols = 100;      // preview width cap, in character cells
   MinimapPreviewPad = 4;            // inner padding of the preview window
   MinimapPreviewDelayMs = 120;      // dwell before the preview first appears
+  MinimapClickTopGap = 2;           // rows kept above the line a minimap click jumps to
+  CaretJumpMinContextRows = 2;      // least context above a programmatic caret jump (SetCaret)
   StyledScrollBarSize = 12;
   DefaultMaxPasteBytes = 64 * 1024 * 1024;
   MinZoomPercent    = 25;
@@ -1804,7 +1806,9 @@ BEGIN
       OffsetRect(R, 0, Work.Bottom - R.Bottom);
     IF R.Top < Work.Top THEN
       OffsetRect(R, 0, Work.Top - R.Top);
-    IF R.Left < Work.Left THEN
+    // Editor partly off the left edge: trim the preview to what is on screen,
+    // but never collapse it (an editor entirely off screen keeps its rect).
+    IF (R.Left < Work.Left) AND (R.Right - Work.Left >= 40) THEN
       R.Left := Work.Left;
   END;
 
@@ -4176,6 +4180,15 @@ BEGIN
   ClearExtraSelections;
   FCaret := NormalizePosition(Value);
   FAnchor := FCaret;
+  // A programmatic jump to a line off screen (goto-line, a procedure list, a
+  // search hit) lands it about a quarter of the way down the view instead of
+  // hard against the top edge, so the code above it - typically the routine
+  // header when the caret is put on the first line of the body - stays in
+  // sight. Keyboard and mouse moves go through MoveCaret and still scroll by
+  // the minimum.
+  IF (FCaret.Line < FTopLine) OR (FCaret.Line >= FTopLine + VisibleLineCount) THEN
+    FTopLine := EnsureRange(FCaret.Line - Max(CaretJumpMinContextRows, VisibleLineCount DIV 4),
+      0, Max(0, FLines.Count - VisibleLineCount));
   EnsureCaretVisible;
   Invalidate;
   DoCaretChange;
@@ -5381,14 +5394,14 @@ BEGIN
     HideTemplates;
     IF MinimapVisible AND PtInRect(MinimapRect, Point(X, Y)) THEN BEGIN
       // Remember where the press landed: a click (no drag, see MouseUp) jumps
-      // the caret to that line. Read the line before scrolling - the map
-      // offset shifts with the viewport.
+      // the caret to that line. Scrolling waits for a drag (MouseMove) or the
+      // release, so a click scrolls once instead of centring first and then
+      // hopping to the click layout.
       FMinimapDragging := True;
       FMinimapDownY := Y;
       FMinimapDownLine := MinimapLineAtY(Y);
       IF FMinimapDownLine < 0 THEN
         FMinimapDownLine := FLines.Count - 1;   // below the map: the last line
-      ScrollMinimapTo(Y);
       Exit;
     END;
     IF StyledVerticalVisible AND PtInRect(StyledVerticalScrollRect, Point(X, Y)) THEN BEGIN
@@ -5545,10 +5558,15 @@ BEGIN
   IF FMinimapDragging THEN BEGIN
     FMinimapDragging := False;
     // A press-and-release without a drag is a click: go to the line that was
-    // under the mouse. Drags keep the old behaviour of scrolling only.
+    // under the mouse, shown a couple of rows below the top of the view so
+    // there is some context above it. Drags keep the old behaviour of
+    // scrolling only. Scroll first so MoveCaret finds the caret already
+    // visible and doesn't scroll a second time.
     IF (Button = mbLeft) AND (Abs(Y - FMinimapDownY) < MinimapLineHeight) AND
-      (FMinimapDownLine >= 0) AND (FMinimapDownLine < FLines.Count) THEN
+      (FMinimapDownLine >= 0) AND (FMinimapDownLine < FLines.Count) THEN BEGIN
+      SetTopLine(FMinimapDownLine - MinimapClickTopGap);
       MoveCaret(TCodePosition.Create(FMinimapDownLine, 0), []);
+    END;
   END;
 END;
 

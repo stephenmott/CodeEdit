@@ -76,9 +76,11 @@ begin
   Form := TForm.Create(nil);
   try
     // MouseDown focuses the editor, which needs a visible form; park it off
-    // screen so the test doesn't flash a window at the user.
+    // screen so the test doesn't flash a window at the user. Off the right
+    // edge, not top-left: the preview clamps itself to the monitor's work
+    // area and would collapse to nothing at negative coordinates.
     Form.Position := poDesigned;
-    Form.SetBounds(-4000, -4000, 900, 700);
+    Form.SetBounds(20000, 100, 900, 700);
     Ed := TCodeEditor.Create(Form);
     Ed.Parent := Form;
     Ed.SetBounds(0, 0, 800, 600);
@@ -99,12 +101,19 @@ begin
     Check(Ed.Caret.Line = 60, 'click on map row 60 puts caret on line 60: ' +
       IntToStr(Ed.Caret.Line));
     Check(Ed.Caret.Column = 0, 'click puts caret at column 0');
-    Check((Ed.TopLine <= 60) and (60 < Ed.TopLine + 40), 'clicked line is visible, TopLine=' +
+    Check(Ed.TopLine = 58, 'clicked line sits two rows below the top, TopLine=' +
       IntToStr(Ed.TopLine));
 
-    // 2. A drag scrolls but leaves the caret alone.
+    // 1b. Clicking near the top of the file can't leave two rows above it.
+    Ed.TopLine := 0;   // MapY assumes an unscrolled map
+    TCracker(Ed).MouseDown(mbLeft, [ssLeft], MapX, MapY(1));
+    TCracker(Ed).MouseUp(mbLeft, [], MapX, MapY(1));
+    Check((Ed.Caret.Line = 1) and (Ed.TopLine = 0), 'click on line 1 clamps TopLine to 0');
+
+    // 2. A drag scrolls but leaves the caret alone; the press itself doesn't scroll.
     L1 := Ed.Caret.Line;
     TCracker(Ed).MouseDown(mbLeft, [ssLeft], MapX, 100);
+    Check(Ed.TopLine = 0, 'press alone does not scroll');
     TCracker(Ed).MouseMove([ssLeft], MapX, 300);
     TCracker(Ed).MouseUp(mbLeft, [], MapX, 300);
     Check(Ed.Caret.Line = L1, 'drag does not move the caret');

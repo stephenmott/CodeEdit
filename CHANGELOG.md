@@ -10,8 +10,8 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   mouse over the minimap pops up a full-size, syntax-coloured preview of the
   seven lines around the one under the mouse (hovered line highlighted in the
   middle, line numbers in a gutter), tracking the mouse as it moves. Clicking
-  the minimap now jumps the caret to that line as well as scrolling to it;
-  dragging still just scrolls.
+  the minimap now jumps the caret to that line and scrolls it to two rows
+  below the top of the view; dragging still just scrolls.
 - `OnGetHint` event: hover-to-evaluate. After the mouse rests over an
   identifier the editor fires `OnGetHint(Line, Column, AWord, var HintText)`
   (1-based position; `AWord` is the identifier, including dotted `a.b.c`
@@ -63,6 +63,14 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   `Ctrl+'+'` / `Ctrl+'-'` (main row and numpad), `Ctrl+0` to reset, and
   `Ctrl+mouse wheel`; `ZoomIn` / `ZoomOut` / `ZoomReset` methods for menus.
   Zoom scales the rendered font; the `Font` property itself is untouched.
+
+### Changed
+- Setting `Caret` to a line that is off screen now scrolls it to about a
+  quarter of the way down the view (at least two rows) instead of the top
+  edge, so a goto-line / procedure-list jump keeps the routine header in
+  sight when the caret lands in the body. Keyboard and mouse caret moves are
+  unchanged. The ScrEdit sample's procedure list no longer forces `TopLine`
+  after setting the caret.
 
 ### Fixed
 - Caret/anchor (and the top line) are clamped back into the document on any

@@ -798,11 +798,11 @@ BEGIN
   IF Sender = actProcList THEN BEGIN
     i := ListProcedures(Self, fCurrentMemo.Lines.Text);
     IF i >= 0 THEN BEGIN
+      // Setting Caret scrolls for us and leaves some context above the line;
+      // forcing TopLine := i afterwards pinned the line to the top edge with
+      // the procedure header just off screen.
       lPoint := TCodePosition.Create(i, 1);
       fCurrentMemo.Caret := lPoint;
-      fCurrentMemo.ShowLine(i);
-      fCurrentMemo.TopLine := i;
-      fCurrentMemo.Invalidate;
     END;
   END;
 

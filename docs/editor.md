@@ -58,7 +58,7 @@ fixed-pitch font — caret math is one column per character cell.
 | `LineCommentPrefix` | `'//'` | Prefix used by `ToggleLineComment` / `CommentSelection` / `UncommentSelection`. Set per language (`'--'` for SQL, `'#'` for Python…). |
 | `MaxPasteBytes` | 64 MB | Refuse larger text pastes (with a warning beep) before the VCL materialises the clipboard text. `0` disables the guard. |
 | `ShowGutter` | `True` | Line-number gutter incl. breakpoint margin. |
-| `ShowMinimap` | `False` | VS Code-style file map on the right; drag it to scroll, click it to jump the caret to that line. |
+| `ShowMinimap` | `False` | VS Code-style file map on the right; drag it to scroll, click it to jump the caret to that line (shown two rows below the top of the view). |
 | `MinimapPreview` | `True` | Hovering the minimap pops up a full-size, syntax-coloured preview of 7 lines around the one under the mouse (that line is highlighted, in the middle). Clicking goes to it. |
 | `TabSize` | `2` | Number of spaces the Tab key inserts, and the indent unit for `IndentSelection` / `UnindentSelection`. |
 | `ThemeSyntaxColors` | `True` | Re-map token colors to theme-appropriate palettes (separate dark/light sets) instead of using the highlighter's raw `Styles[]`. |
@@ -70,7 +70,7 @@ caret arithmetic stays aligned; the Tab key itself always inserts spaces.
 
 | Property | Notes |
 |---|---|
-| `Caret: TCodePosition` | Get/set the caret (0-based). Setting clears extra carets and scrolls into view. |
+| `Caret: TCodePosition` | Get/set the caret (0-based). Setting clears extra carets and scrolls into view; a target off screen lands about a quarter of the way down the view (at least two rows), so the code above it stays visible. Don't force `TopLine` afterwards. |
 | `SelectedText: string` | Get the selection / replace it (undo-grouped). |
 | `TopLine`, `LeftColumn: Integer` | Scroll position (0-based, clamped). |
 | `ExecutionLine: Integer` | 1-based current-statement line; `-1` (or any value < 1) clears it. |
