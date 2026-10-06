@@ -26,7 +26,10 @@ attribution is appreciated.
   line markers for debugger hosts — design-time editable, 1-based, edit-tracked
 - Undo/redo with typing coalescing that also restores breakpoints,
   execution line, and the `Modified` flag
-- Minimap, styled scrollbars, bracket matching, occurrence highlighting
+- Minimap (with hover preview), styled scrollbars, bracket matching,
+  occurrence highlighting
+- Printing: `TCodeEditorPrinter` with syntax colours, line numbers,
+  header/footer macros, word wrap, print dialog and a built-in preview
 
 ## Documentation
 
@@ -40,6 +43,8 @@ attribution is appreciated.
   component, placeholder syntax, and the template editor dialog
 - [Breakpoints and line markers](docs/breakpoints-markers.md) — the
   debugger-host surface
+- [Printing](docs/printing.md) — `TCodeEditorPrinter`, options, macros,
+  preview, drawing pages on your own canvas
 
 ## Units
 
@@ -53,6 +58,8 @@ attribution is appreciated.
   `TCodeTemplateProvider`
 - `Source\CodeEdit.TemplateEditorDlg.pas` — runtime/design-time template
   editor dialog
+- `Source\CodeEdit.Print.pas` — `TCodeEditorPrinter` and the print preview
+  form
 - `Source\CodeEdit.DevExpressTheme.pas` — optional DevExpress skin bridge
   (add to apps directly; not part of the package)
 - `Source\CodeEdit.Register.pas` — registers everything on the `CodeEdit`

@@ -6,6 +6,18 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Printing: new `CodeEdit.Print` unit with `TCodeEditorPrinter` (on the
+  palette). `Execute` shows the standard print dialog (page range, copies,
+  selection), `Print` / `Print(From, To)` print directly, `Preview` opens a
+  built-in preview form (paging, fit page / fit width / zoom, Print...).
+  Pages carry the highlighter's colours (or black with bold/italic kept),
+  a line-number column, header and footer bands with `$TITLE`, `$PAGE`,
+  `$PAGES`, `$DATE`, `$TIME` macros and `left|centre|right` sections, word
+  wrap at the right margin, millimetre margins, and optional
+  selection-only output. `Paginate` + `DrawPage` are public for drawing
+  into any canvas. The ScrEdit sample's Print and Preview buttons use it.
+  `TCodeEditor.LineTokens`, `HasSelection`, `SelectionStart` and
+  `SelectionEnd` are now public for it. See `docs/printing.md`.
 - `GotoRoutineBody(HeaderLine)` / `FindRoutineBodyLine(HeaderLine)`: from a
   routine's header line, find its own `BEGIN` (skipping `var`/`const`
   sections and nested local routines by indentation), put the caret on the

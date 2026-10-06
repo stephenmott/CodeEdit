@@ -28,7 +28,7 @@ USES
   dxBarExtItems, dxBarBuiltInMenu, dxScrollbarAnnotations,
 
   {CodeEdit}
-  CodeEdit.Highlighter, CodeEdit.Completion, CodeEdit.Editor,
+  CodeEdit.Highlighter, CodeEdit.Completion, CodeEdit.Editor, CodeEdit.Print,
 
   {JVCL}
   JvComponentBase, JvFormPlacement, JvAppStorage, JvAppRegistryStorage,
@@ -266,6 +266,7 @@ TYPE
     fStopped: Boolean;
     fCurrentMemo: TCodeEditor;
     fRunningMemo: TCodeEditor;
+    fPrinter: TCodeEditorPrinter;
     fCurGUID: STRING;
     fLexer: STRING;
     fCalcul: TCalcul;
@@ -639,6 +640,14 @@ BEGIN
   dxCut.OnClick := EditorCommandClick;
   dxCopy.OnClick := EditorCommandClick;
   dxPaste.OnClick := EditorCommandClick;
+
+  // Printing: the printer follows whichever editor is current (see
+  // CodeEditorEnter); Print... shows the standard dialog, Preview the
+  // built-in preview form.
+  fPrinter := TCodeEditorPrinter.Create(Self);
+  fPrinter.Editor := fCurrentMemo;
+  dxPrint.OnClick := EditorCommandClick;
+  dxPrintPreview.OnClick := EditorCommandClick;
 END;
 
 PROCEDURE TForm1.EditorCommandClick(Sender: TObject);
@@ -651,7 +660,16 @@ BEGIN
   ELSE IF Sender = dxCopy THEN
     fCurrentMemo.ExecuteCommand(eccCopy)
   ELSE IF Sender = dxPaste THEN
-    fCurrentMemo.ExecuteCommand(eccPaste);
+    fCurrentMemo.ExecuteCommand(eccPaste)
+  ELSE IF Sender = dxPrint THEN BEGIN
+    fPrinter.Editor := fCurrentMemo;
+    fPrinter.Title := fItem;
+    fPrinter.Execute;
+  END ELSE IF Sender = dxPrintPreview THEN BEGIN
+    fPrinter.Editor := fCurrentMemo;
+    fPrinter.Title := fItem;
+    fPrinter.Preview;
+  END;
 END;
 
 PROCEDURE TForm1.CodeEditorEnter(Sender: TObject);

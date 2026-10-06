@@ -390,9 +390,6 @@ TYPE
     FUNCTION IsDarkTheme(CONST Colors: TCodeEditorThemeColors): Boolean;
     FUNCTION TokenStyleForTheme(Kind: TCodeTokenKind; CONST BaseStyle: TCodeTextStyle;
       CONST Colors: TCodeEditorThemeColors): TCodeTextStyle;
-    FUNCTION HasSelection: Boolean;
-    FUNCTION SelectionStart: TCodePosition;
-    FUNCTION SelectionEnd: TCodePosition;
     FUNCTION RangeStart(CONST Range: TCodeSelectionRange): TCodePosition;
     FUNCTION RangeEnd(CONST Range: TCodeSelectionRange): TCodePosition;
     FUNCTION OccurrenceAlreadySelected(CONST APos: TCodePosition): Boolean;
@@ -502,7 +499,6 @@ TYPE
     FUNCTION ScaledFontSize: Integer;
     PROCEDURE UpdateScrollBars;
     PROCEDURE EnsureLineStates(UpToLine: Integer);
-    FUNCTION LineTokens(ALineIndex: Integer): TCodeTokenArray;
     FUNCTION WindowInPopups(Wnd: HWND): Boolean;
     FUNCTION MovePositionForKey(CONST Position: TCodePosition; Key: Word): TCodePosition;
     PROCEDURE MoveMultipleCarets(Key: Word; Shift: TShiftState);
@@ -617,6 +613,14 @@ TYPE
     // its BEGIN, at the first non-blank column) and scrolls so the header is
     // still on screen above it whenever the two fit. Returns the caret line.
     FUNCTION GotoRoutineBody(HeaderLine: Integer; CONST BodyKeyword: STRING = 'begin'): Integer;
+    // Primary selection, ordered (start <= end). Equal when there is none.
+    FUNCTION HasSelection: Boolean;
+    FUNCTION SelectionStart: TCodePosition;
+    FUNCTION SelectionEnd: TCodePosition;
+    // The highlighter's tokens for a line (0-based), from the editor's cache,
+    // with the multi-line state already resolved; nil without a highlighter.
+    // Token.Start is 1-based. Used by TCodeEditorPrinter.
+    FUNCTION LineTokens(ALineIndex: Integer): TCodeTokenArray;
     FUNCTION HasBreakpoint(Line: Integer): Boolean;
     FUNCTION BreakpointLines: TArray<Integer>;
     PROPERTY CanUndoAction: Boolean READ CanUndo;
