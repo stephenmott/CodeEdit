@@ -6,6 +6,15 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Minimap draws real text: each line is rendered with a bold font at three
+  times the map size, shrunk with a halftone average and contrast-boosted,
+  so word shapes, line lengths and token colours survive at 3 px per line
+  (the look of the Delphi 13 / VS Code maps) instead of a solid bar per
+  token. The rendering is cached per scroll offset and refreshed only when
+  the text, theme, highlighter, font or size changes; scrolling shifts the
+  cache and renders just the exposed band. New options
+  `MinimapStyle` (`cmsText` default, `cmsBlocks` = the old bars) and
+  `MinimapRowHeight` (2..8 px per line, default 3; was a fixed 4).
 - Printing: new `CodeEdit.Print` unit with `TCodeEditorPrinter` (on the
   palette). `Execute` shows the standard print dialog (page range, copies,
   selection), `Print` / `Print(From, To)` print directly, `Preview` opens a

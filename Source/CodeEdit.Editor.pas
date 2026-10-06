@@ -62,12 +62,19 @@ TYPE
   TCodeEditorResolveThemeEvent = PROCEDURE(Sender: TObject; Colors: TCodeEditorThemeColors) OF
     OBJECT;
 
+  // How the minimap draws each line: shrunken real text (word shapes and
+  // lengths survive, like the Delphi 13 / VS Code maps) or a solid bar per
+  // token (the original, cheapest rendering).
+  TCodeMinimapStyle = (cmsText, cmsBlocks);
+
   TCodeEditorOptions = CLASS(TPersistent)
   PRIVATE
     FBracketMatching: Boolean;
     FLineCommentPrefix: STRING;
     FShowMinimap: Boolean;
     FMinimapPreview: Boolean;
+    FMinimapRowHeight: Integer;
+    FMinimapStyle: TCodeMinimapStyle;
     FMaxPasteBytes: Integer;
     FThemeSyntaxColors: Boolean;
     FShowGutter: Boolean;
@@ -78,6 +85,8 @@ TYPE
     PROCEDURE SetMaxPasteBytes(Value: Integer);
     PROCEDURE SetShowMinimap(Value: Boolean);
     PROCEDURE SetMinimapPreview(Value: Boolean);
+    PROCEDURE SetMinimapRowHeight(Value: Integer);
+    PROCEDURE SetMinimapStyle(Value: TCodeMinimapStyle);
     PROCEDURE SetThemeSyntaxColors(Value: Boolean);
     PROCEDURE SetShowGutter(Value: Boolean);
     PROCEDURE SetTabSize(Value: Integer);
@@ -95,6 +104,11 @@ TYPE
     // Hovering the minimap pops up a full-size preview of the lines under the
     // mouse (the hovered line in the middle); clicking jumps the caret there.
     PROPERTY MinimapPreview: Boolean READ FMinimapPreview WRITE SetMinimapPreview DEFAULT True;
+    // Pixels per document line in the minimap (2..8). Smaller shows more of
+    // the file; 3 gives readable word shapes with cmsText.
+    PROPERTY MinimapRowHeight: Integer READ FMinimapRowHeight WRITE SetMinimapRowHeight DEFAULT 3;
+    PROPERTY MinimapStyle: TCodeMinimapStyle READ FMinimapStyle WRITE SetMinimapStyle
+      DEFAULT cmsText;
     PROPERTY TabSize: Integer READ FTabSize WRITE SetTabSize DEFAULT 2;
     PROPERTY ThemeSyntaxColors: Boolean READ FThemeSyntaxColors WRITE SetThemeSyntaxColors DEFAULT
       True;
@@ -311,6 +325,18 @@ TYPE
     FMinimapPreviewTimer: TTimer;
     FMinimapPreviewLine: Integer;
     FMinimapPreviewMouse: TPoint;
+    // Rendered minimap content (cmsText), reused between paints until the
+    // text, theme, highlighter, size or scroll offset changes.
+    FMinimapCache: Vcl.Graphics.TBitmap;
+    FMinimapCacheValid: Boolean;
+    FMinimapCacheDirty: Boolean;             // text changed: update incrementally
+    FMinimapCacheTexts: TArray<STRING>;      // the lines the cache was rendered from
+    FMinimapCacheFirstLine: Integer;         // document line of FMinimapCacheTexts[0]
+    FMinimapCacheOffset: Integer;
+    FMinimapCacheBackground: TColor;
+    FMinimapCacheText: TColor;
+    FMinimapCacheLineCount: Integer;
+    FMinimapCacheRowHeight: Integer;
     FScrollDragOffset: Integer;
     FSelections: TList<TCodeSelectionRange>;
     FSuppressKeyPress: Boolean;
@@ -370,6 +396,20 @@ TYPE
     FUNCTION MinimapScrollOffset: Integer;
     FUNCTION MinimapViewportRect: TRect;
     PROCEDURE ScrollMinimapTo(Y: Integer);
+    FUNCTION MinimapRowHeight: Integer;
+    PROCEDURE InvalidateMinimapCache;
+    PROCEDURE MarkMinimapCacheDirty;
+    PROCEDURE SnapshotMinimapCacheTexts(CONST R: TRect);
+    FUNCTION UpdateMinimapCacheIncremental(CONST R: TRect;
+      CONST Colors: TCodeEditorThemeColors): Boolean;
+    PROCEDURE EnsureMinimapCache(CONST R: TRect; ScrollOffset: Integer;
+      CONST Colors: TCodeEditorThemeColors);
+    PROCEDURE RenderMinimapBand(CONST R: TRect; ScrollOffset, BandTop, BandBottom: Integer;
+      CONST Colors: TCodeEditorThemeColors);
+    PROCEDURE DownsampleMinimapBand(Src, Dest: Vcl.Graphics.TBitmap; DestTop: Integer;
+      Background: TColor);
+    PROCEDURE PaintMinimapBlocks(CONST R: TRect; ScrollOffset: Integer;
+      CONST Colors: TCodeEditorThemeColors);
     FUNCTION MinimapLineAtY(Y: Integer): Integer;
     PROCEDURE MinimapPreviewTimerFired(Sender: TObject);
     PROCEDURE ShowMinimapPreview(Line, MouseY: Integer);
@@ -722,7 +762,7 @@ CONST
   BreakpointMarginWidth = 16;
   MinimapWidth      = 192;
   MinimapGap        = 4;
-  MinimapLineHeight = 4;
+  MinimapSupersample = 3;           // cmsText renders at this multiple and shrinks with HALFTONE
   MinimapPreviewLines = 7;          // rows in the hover preview; hovered row sits in the middle
   MinimapPreviewMaxCols = 100;      // preview width cap, in character cells
   MinimapPreviewPad = 4;            // inner padding of the preview window
@@ -837,6 +877,8 @@ BEGIN
   FShowGutter := True;
   FShowMinimap := False;
   FMinimapPreview := True;
+  FMinimapRowHeight := 3;
+  FMinimapStyle := cmsText;
   FMaxPasteBytes := DefaultMaxPasteBytes;
   FThemeSyntaxColors := True;
   FTabSize := 2;
@@ -856,6 +898,8 @@ BEGIN
     FShowGutter := TCodeEditorOptions(Source).ShowGutter;
     FShowMinimap := TCodeEditorOptions(Source).ShowMinimap;
     FMinimapPreview := TCodeEditorOptions(Source).MinimapPreview;
+    FMinimapRowHeight := TCodeEditorOptions(Source).MinimapRowHeight;
+    FMinimapStyle := TCodeEditorOptions(Source).MinimapStyle;
     FMaxPasteBytes := TCodeEditorOptions(Source).MaxPasteBytes;
     FTabSize := TCodeEditorOptions(Source).TabSize;
     FThemeSyntaxColors := TCodeEditorOptions(Source).ThemeSyntaxColors;
@@ -909,6 +953,23 @@ PROCEDURE TCodeEditorOptions.SetMinimapPreview(Value: Boolean);
 BEGIN
   IF FMinimapPreview <> Value THEN BEGIN
     FMinimapPreview := Value;
+    Changed;
+  END;
+END;
+
+PROCEDURE TCodeEditorOptions.SetMinimapRowHeight(Value: Integer);
+BEGIN
+  Value := EnsureRange(Value, 2, 8);
+  IF FMinimapRowHeight <> Value THEN BEGIN
+    FMinimapRowHeight := Value;
+    Changed;
+  END;
+END;
+
+PROCEDURE TCodeEditorOptions.SetMinimapStyle(Value: TCodeMinimapStyle);
+BEGIN
+  IF FMinimapStyle <> Value THEN BEGIN
+    FMinimapStyle := Value;
     Changed;
   END;
 END;
@@ -1258,6 +1319,7 @@ BEGIN
   HideHoverHint;
   HideMinimapPreview;
   FMinimapPreview.Free;
+  FMinimapCache.Free;
   FHintWindow.Free;
   FCompletionForm.Free;
   FCompletionItems.Free;
@@ -1309,14 +1371,17 @@ BEGIN
   UpdateMetrics;
   UpdateScrollBars;
   UpdateCaret;
+  InvalidateMinimapCache;
   Invalidate;
 END;
 
 PROCEDURE TCodeEditor.CMStyleChanged(VAR Message: TMessage);
 BEGIN
   INHERITED;
-  IF FThemeMode = ctmVclStyle THEN
+  IF FThemeMode = ctmVclStyle THEN BEGIN
+    InvalidateMinimapCache;
     Invalidate;
+  END;
 END;
 
 PROCEDURE TCodeEditor.WMGetDlgCode(VAR Message: TWMGetDlgCode);
@@ -1683,7 +1748,7 @@ END;
 
 FUNCTION TCodeEditor.MinimapContentHeight: Integer;
 BEGIN
-  Result := Max(1, FLines.Count) * MinimapLineHeight;
+  Result := Max(1, FLines.Count) * MinimapRowHeight;
 END;
 
 FUNCTION TCodeEditor.MinimapScrollOffset: Integer;
@@ -1713,9 +1778,9 @@ BEGIN
     Exit;
 
   ScrollOffset := MinimapScrollOffset;
-  ViewHeight := Max(8, VisibleLineCount * MinimapLineHeight);
+  ViewHeight := Max(8, VisibleLineCount * MinimapRowHeight);
   ViewHeight := Min(ViewHeight, R.Height);
-  Result.Top := R.Top + FTopLine * MinimapLineHeight - ScrollOffset;
+  Result.Top := R.Top + FTopLine * MinimapRowHeight - ScrollOffset;
   Result.Top := EnsureRange(Result.Top, R.Top, Max(R.Top, R.Bottom - ViewHeight));
   Result.Bottom := Result.Top + ViewHeight;
 END;
@@ -1732,7 +1797,7 @@ BEGIN
     Exit;
 
   ScrollOffset := MinimapScrollOffset;
-  TargetLine := (ScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapLineHeight;
+  TargetLine := (ScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapRowHeight;
   OldTop := FTopLine;
   FTopLine := TargetLine - VisibleLineCount DIV 2;
   FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
@@ -1751,7 +1816,7 @@ BEGIN
   R := MinimapRect;
   IF (R.Height <= 0) OR (FLines.Count <= 0) THEN
     Exit;
-  Result := (MinimapScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapLineHeight;
+  Result := (MinimapScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapRowHeight;
   IF Result >= FLines.Count THEN
     Result := -1;
 END;
@@ -4071,6 +4136,7 @@ BEGIN
     FStateChainValid := 0;
     IF Assigned(FHighlighter) THEN
       FHighlighter.FreeNotification(Self);
+    InvalidateMinimapCache;
     Invalidate;
   END;
 END;
@@ -4270,6 +4336,7 @@ BEGIN
   // We don't know which line changed, so restart state validation from the
   // top; EnsureLineStates reuses cached entries, so this is cheap.
   FStateChainValid := 0;
+  MarkMinimapCacheDirty;
   UpdateGutterWidth;
   UpdateScrollBars;
   IF NOT FApplyingUndo THEN BEGIN
@@ -4287,11 +4354,13 @@ PROCEDURE TCodeEditor.OptionsChanged(Sender: TObject);
 BEGIN
   UpdateMetrics;
   UpdateScrollBars;
+  InvalidateMinimapCache;
   Invalidate;
 END;
 
 PROCEDURE TCodeEditor.ThemeChanged(Sender: TObject);
 BEGIN
+  InvalidateMinimapCache;
   Invalidate;
 END;
 
@@ -5672,7 +5741,7 @@ BEGIN
     // there is some context above it. Drags keep the old behaviour of
     // scrolling only. Scroll first so MoveCaret finds the caret already
     // visible and doesn't scroll a second time.
-    IF (Button = mbLeft) AND (Abs(Y - FMinimapDownY) < MinimapLineHeight) AND
+    IF (Button = mbLeft) AND (Abs(Y - FMinimapDownY) < Max(3, MinimapRowHeight)) AND
       (FMinimapDownLine >= 0) AND (FMinimapDownLine < FLines.Count) THEN BEGIN
       SetTopLine(FMinimapDownLine - MinimapClickTopGap);
       MoveCaret(TCodePosition.Create(FMinimapDownLine, 0), []);
@@ -6313,15 +6382,389 @@ BEGIN
   END;
 END;
 
-PROCEDURE TCodeEditor.PaintMinimap;
+FUNCTION TCodeEditor.MinimapRowHeight: Integer;
+BEGIN
+  IF Assigned(FOptions) THEN
+    Result := EnsureRange(FOptions.MinimapRowHeight, 2, 8)
+  ELSE
+    Result := 3;
+END;
+
+PROCEDURE TCodeEditor.InvalidateMinimapCache;
+BEGIN
+  FMinimapCacheValid := False;
+END;
+
+// The text changed (we don't know where): the next paint diffs the visible
+// lines against the ones the cache was rendered from and redraws only those.
+PROCEDURE TCodeEditor.MarkMinimapCacheDirty;
+BEGIN
+  FMinimapCacheDirty := True;
+END;
+
+// Remembers which lines (and their text) the cache currently shows, for the
+// incremental update to diff against.
+PROCEDURE TCodeEditor.SnapshotMinimapCacheTexts(CONST R: TRect);
 VAR
-  R                 : TRect;
-  ViewR             : TRect;
-  ThemeColors       : TCodeEditorThemeColors;
+  RowH              : Integer;
+  First             : Integer;
+  Count             : Integer;
+  I                 : Integer;
+BEGIN
+  RowH := MinimapRowHeight;
+  First := Max(0, FMinimapCacheOffset DIV RowH);
+  Count := EnsureRange(FLines.Count - First, 0, (R.Height + RowH - 1) DIV RowH + 1);
+  FMinimapCacheFirstLine := First;
+  SetLength(FMinimapCacheTexts, Count);
+  FOR I := 0 TO Count - 1 DO
+    FMinimapCacheTexts[I] := FLines[First + I];
+  FMinimapCacheLineCount := FLines.Count;
+  FMinimapCacheDirty := False;
+END;
+
+// Applies a text change to the cache without re-rendering the whole map.
+// Lines are compared from the top (common prefix) and, when lines were
+// inserted or deleted, from the bottom (common suffix): the rows in between
+// are redrawn and everything below them is shifted by the line delta. A
+// keystroke redraws one row; Enter shifts the rows below and draws two.
+// Returns False when the cache can't be patched and must be rebuilt.
+FUNCTION TCodeEditor.UpdateMinimapCacheIncremental(CONST R: TRect;
+  CONST Colors: TCodeEditorThemeColors): Boolean;
+VAR
+  RowH              : Integer;
+  First             : Integer;
+  OldCount          : Integer;      // cached rows
+  Delta             : Integer;      // change in FLines.Count
+  Prefix            : Integer;
+  Suffix            : Integer;
+  I                 : Integer;
+  NewChanged        : Integer;
+  ShiftFrom         : Integer;
+  SrcY              : Integer;
+  RenderBottom      : Integer;
+  Y                 : Integer;
+
+  FUNCTION RowY(Row: Integer): Integer;
+  BEGIN
+    Result := (First + Row) * RowH - FMinimapCacheOffset;
+  END;
+
+BEGIN
+  Result := False;
+  RowH := MinimapRowHeight;
+  First := FMinimapCacheFirstLine;
+  OldCount := Length(FMinimapCacheTexts);
+  Delta := FLines.Count - FMinimapCacheLineCount;
+  IF (First <> Max(0, FMinimapCacheOffset DIV RowH)) OR (First >= FLines.Count) THEN
+    Exit;
+
+  Prefix := 0;
+  WHILE (Prefix < OldCount) AND (First + Prefix < FLines.Count) AND
+    (FLines[First + Prefix] = FMinimapCacheTexts[Prefix]) DO
+    Inc(Prefix);
+
+  IF Delta = 0 THEN BEGIN
+    // Same line count: redraw every row whose text differs (usually one).
+    FOR I := Prefix TO OldCount - 1 DO
+      IF (First + I >= FLines.Count) OR (FLines[First + I] <> FMinimapCacheTexts[I]) THEN BEGIN
+        Y := RowY(I);
+        RenderMinimapBand(R, FMinimapCacheOffset, Y, Y + RowH, Colors);
+      END;
+  END ELSE BEGIN
+    Suffix := 0;
+    WHILE (Suffix < OldCount - Prefix) AND (First + OldCount - 1 - Suffix + Delta >= 0) AND
+      (First + OldCount - 1 - Suffix + Delta < FLines.Count) AND
+      (FLines[First + OldCount - 1 - Suffix + Delta] = FMinimapCacheTexts[OldCount - 1 - Suffix]) DO
+      Inc(Suffix);
+    NewChanged := OldCount - Suffix - Prefix + Delta;    // rows the change now occupies
+    IF NewChanged < 0 THEN
+      Exit;                                              // deletion reaching above the map
+
+    // Rows below the change keep their pixels, just Delta rows lower/higher.
+    // The copy can only start at the top of the bitmap: when the change sits
+    // above the map (ShiftFrom < 0, the partially visible first row) the
+    // rows the copy can't supply are rendered instead.
+    ShiftFrom := RowY(OldCount - Suffix);
+    SrcY := Max(0, ShiftFrom);
+    IF (SrcY < R.Height) AND (Delta * RowH < R.Height) THEN
+      BitBlt(FMinimapCache.Canvas.Handle, 0, SrcY + Delta * RowH, R.Width, R.Height - SrcY,
+        FMinimapCache.Canvas.Handle, 0, SrcY, SRCCOPY);
+    RenderBottom := RowY(Prefix + NewChanged);
+    IF (Delta > 0) AND (ShiftFrom < 0) THEN
+      RenderBottom := Max(RenderBottom, Delta * RowH);
+    RenderMinimapBand(R, FMinimapCacheOffset, RowY(Prefix), RenderBottom, Colors);
+    IF Delta < 0 THEN
+      // Deleted lines: the bottom band shows lines that weren't cached yet.
+      RenderMinimapBand(R, FMinimapCacheOffset, R.Height + Delta * RowH - RowH, R.Height, Colors);
+  END;
+
+  SnapshotMinimapCacheTexts(R);
+  Result := True;
+END;
+
+// Brings FMinimapCache up to date for the map rect R at ScrollOffset. A text
+// change is patched in place, a change of offset (scrolling) shifts the
+// bitmap and renders only the exposed band; anything else - size, theme,
+// font, highlighter, options - re-renders the whole map.
+PROCEDURE TCodeEditor.EnsureMinimapCache(CONST R: TRect; ScrollOffset: Integer;
+  CONST Colors: TCodeEditorThemeColors);
+VAR
+  Delta             : Integer;
+  Reuse             : Boolean;
+BEGIN
+  IF FMinimapCache = NIL THEN BEGIN
+    FMinimapCache := Vcl.Graphics.TBitmap.Create;
+    FMinimapCache.PixelFormat := pf24bit;
+  END;
+
+  Reuse := FMinimapCacheValid AND (FMinimapCache.Width = R.Width) AND
+    (FMinimapCache.Height = R.Height) AND (FMinimapCacheBackground = Colors.Background) AND
+    (FMinimapCacheText = Colors.Text) AND (FMinimapCacheRowHeight = MinimapRowHeight);
+
+  IF Reuse AND FMinimapCacheDirty THEN
+    Reuse := UpdateMinimapCacheIncremental(R, Colors);
+
+  IF Reuse AND (FMinimapCacheOffset = ScrollOffset) THEN
+    Exit;
+
+  IF Reuse AND (Abs(ScrollOffset - FMinimapCacheOffset) < R.Height) THEN BEGIN
+    Delta := ScrollOffset - FMinimapCacheOffset;
+    BitBlt(FMinimapCache.Canvas.Handle, 0, 0, R.Width, R.Height, FMinimapCache.Canvas.Handle, 0,
+      Delta, SRCCOPY);
+    FMinimapCacheOffset := ScrollOffset;
+    IF Delta > 0 THEN
+      RenderMinimapBand(R, ScrollOffset, R.Height - Delta, R.Height, Colors)
+    ELSE
+      RenderMinimapBand(R, ScrollOffset, 0, -Delta, Colors);
+    SnapshotMinimapCacheTexts(R);
+    Exit;
+  END;
+
+  FMinimapCache.SetSize(R.Width, R.Height);
+  FMinimapCacheOffset := ScrollOffset;
+  FMinimapCacheBackground := Colors.Background;
+  FMinimapCacheText := Colors.Text;
+  FMinimapCacheRowHeight := MinimapRowHeight;
+  RenderMinimapBand(R, ScrollOffset, 0, R.Height, Colors);
+  SnapshotMinimapCacheTexts(R);
+  FMinimapCacheValid := True;
+END;
+
+// Renders map rows BandTop..BandBottom (pixels from the top of the map) into
+// FMinimapCache: the lines are drawn with a real font at MinimapSupersample
+// times the map size, then shrunk with a HALFTONE StretchBlt. The averaging
+// keeps word shapes, lengths and token colours visible at 2-3 px per line,
+// where drawing a 2 px font directly gives only noise.
+PROCEDURE TCodeEditor.RenderMinimapBand(CONST R: TRect; ScrollOffset, BandTop, BandBottom: Integer;
+  CONST Colors: TCodeEditorThemeColors);
+VAR
+  S                 : Integer;
+  RowH              : Integer;
+  Src               : Vcl.Graphics.TBitmap;
+  BandH             : Integer;
+  FirstLine         : Integer;
+  LastLine          : Integer;
+  LineIndex         : Integer;
+  Y                 : Integer;
+  X0                : Integer;
+  CharW             : Integer;
+  MaxChars          : Integer;
+  LineText          : STRING;
+  Tokens            : TCodeTokenArray;
+  Token             : TCodeToken;
+  Style             : TCodeTextStyle;
+  Dark              : Boolean;
+  MapBackground     : TColor;
+  RunStart          : Integer;
+  RunLength         : Integer;
+  RunStyle          : TCodeTextStyle;
+  RowClip           : TRect;
+BEGIN
+  BandTop := Max(0, BandTop);
+  BandBottom := Min(R.Height, BandBottom);
+  BandH := BandBottom - BandTop;
+  IF (BandH <= 0) OR (R.Width <= 0) THEN
+    Exit;
+
+  S := MinimapSupersample;
+  RowH := MinimapRowHeight;
+  Dark := IsDarkTheme(Colors);
+  IF Dark THEN
+    MapBackground := ShiftBrightness(Colors.Background, 10)
+  ELSE
+    MapBackground := ShiftBrightness(Colors.Background, -6);
+
+  Src := Vcl.Graphics.TBitmap.Create;
+  TRY
+    Src.PixelFormat := pf24bit;
+    Src.SetSize(R.Width * S, BandH * S);
+    Src.Canvas.Brush.Style := bsSolid;
+    Src.Canvas.Brush.Color := MapBackground;
+    Src.Canvas.FillRect(Rect(0, 0, Src.Width, Src.Height));
+
+    // A bold glyph filling the supersampled row, antialiased in grey (not
+    // ClearType, whose colour fringes would survive the downscale as tint).
+    // Thin regular strokes average away to almost nothing at 3 px per line;
+    // bold keeps enough ink for the words to read as shapes.
+    Src.Canvas.Font.Assign(Font);
+    Src.Canvas.Font.Height := -Max(4, RowH * S);
+    Src.Canvas.Font.Quality := fqAntialiased;
+    Src.Canvas.Brush.Style := bsClear;
+    CharW := Max(1, Src.Canvas.TextWidth('M'));
+    X0 := 3 * S;
+    MaxChars := (Src.Width - X0) DIV CharW + 2;
+
+    FirstLine := Max(0, (ScrollOffset + BandTop) DIV RowH);
+    LastLine := Min(FLines.Count - 1, (ScrollOffset + BandBottom - 1) DIV RowH);
+    FOR LineIndex := FirstLine TO LastLine DO BEGIN
+      Y := (LineIndex * RowH - ScrollOffset - BandTop) * S;
+      LineText := FLines[LineIndex];
+      IF LineText = '' THEN
+        Continue;
+      IF Pos(#9, LineText) > 0 THEN
+        LineText := StringReplace(LineText, #9, ' ', [rfReplaceAll]);
+      // Each line is clipped to its own row: the glyph cell is taller than
+      // the row, and a spill into the next row would make a single-row
+      // re-render (incremental update) differ from a full one.
+      RowClip := Rect(0, Y, Src.Width, Y + RowH * S);
+
+      Tokens := NIL;
+      IF Assigned(FHighlighter) THEN
+        Tokens := LineTokens(LineIndex);
+      IF Length(Tokens) = 0 THEN BEGIN
+        Src.Canvas.Font.Style := [fsBold];
+        Src.Canvas.Font.Color := Colors.Text;
+        Src.Canvas.TextRect(RowClip, X0, Y, Copy(LineText, 1, MaxChars));
+      END ELSE BEGIN
+        // One TextOut per run of same-coloured tokens (whitespace joins the
+        // run it follows): TextOut calls, not pixels, dominate the cost here.
+        RunStart := 0;
+        RunLength := 0;
+        RunStyle.Foreground := clNone;
+        RunStyle.FontStyle := [];
+        FOR Token IN Tokens DO BEGIN
+          IF Token.Start > MaxChars THEN
+            Break;
+          IF Token.Kind = tkWhitespace THEN BEGIN
+            IF RunLength > 0 THEN
+              Inc(RunLength, Token.Length);
+            Continue;
+          END;
+          Style := TokenStyleForTheme(Token.Kind, FHighlighter.Styles[Token.Kind], Colors);
+          IF (RunLength > 0) AND (Style.Foreground = RunStyle.Foreground) AND
+            (Style.FontStyle = RunStyle.FontStyle) AND (RunStart + RunLength = Token.Start) THEN
+            Inc(RunLength, Token.Length)
+          ELSE BEGIN
+            IF RunLength > 0 THEN BEGIN
+              Src.Canvas.Font.Style := RunStyle.FontStyle + [fsBold];
+              Src.Canvas.Font.Color := RunStyle.Foreground;
+              Src.Canvas.TextRect(RowClip, X0 + (RunStart - 1) * CharW, Y,
+                Copy(LineText, RunStart, Min(RunLength, MaxChars - RunStart + 1)));
+            END;
+            RunStart := Token.Start;
+            RunLength := Token.Length;
+            RunStyle := Style;
+          END;
+        END;
+        IF RunLength > 0 THEN BEGIN
+          Src.Canvas.Font.Style := RunStyle.FontStyle + [fsBold];
+          Src.Canvas.Font.Color := RunStyle.Foreground;
+          Src.Canvas.TextRect(RowClip, X0 + (RunStart - 1) * CharW, Y,
+            Copy(LineText, RunStart, Min(RunLength, MaxChars - RunStart + 1)));
+        END;
+      END;
+    END;
+
+    DownsampleMinimapBand(Src, FMinimapCache, BandTop, MapBackground);
+  FINALLY
+    Src.Free;
+  END;
+END;
+
+// Shrinks the supersampled band into the cache at DestTop: every cache pixel
+// is the plain average of its MinimapSupersample x MinimapSupersample source
+// block, then pushed away from the map background by a gain of 1.6 (the
+// average of a few glyph pixels over mostly background is pale; the gain
+// brings it back to the weight of the editor's own text). Done by hand
+// rather than with a HALFTONE StretchBlt so the result is exactly the same
+// whether a band or the whole map is rendered - the incremental update
+// relies on that.
+PROCEDURE TCodeEditor.DownsampleMinimapBand(Src, Dest: Vcl.Graphics.TBitmap; DestTop: Integer;
+  Background: TColor);
+CONST
+  GainNum           = 8;
+  GainDen           = 5;
+TYPE
+  TRGBTripleArray = ARRAY[0..MaxInt DIV SizeOf(TRGBTriple) - 1] OF TRGBTriple;
+  PRGBTripleArray = ^TRGBTripleArray;
+VAR
+  S                 : Integer;
+  Area              : Integer;
+  DestW             : Integer;
+  DestH             : Integer;
+  SrcRows           : ARRAY OF PRGBTripleArray;
+  Y                 : Integer;
+  X                 : Integer;
+  I                 : Integer;
+  J                 : Integer;
+  SumR              : Integer;
+  SumG              : Integer;
+  SumB              : Integer;
+  DestRow           : PRGBTripleArray;
+  BgRGB             : TColorRef;
+  BR, BG, BB        : Integer;
+
+  FUNCTION Push(Sum, Base: Integer): Byte;
+  BEGIN
+    // Sum/Area is the block average; the gain is applied around the background.
+    Result := EnsureRange(Base + (Sum - Base * Area) * GainNum DIV (GainDen * Area), 0, 255);
+  END;
+
+BEGIN
+  IF (Src.PixelFormat <> pf24bit) OR (Dest.PixelFormat <> pf24bit) THEN
+    Exit;
+  S := MinimapSupersample;
+  Area := S * S;
+  DestW := Min(Dest.Width, Src.Width DIV S);
+  DestH := Min(Dest.Height - DestTop, Src.Height DIV S);
+  IF (DestW <= 0) OR (DestH <= 0) THEN
+    Exit;
+  BgRGB := ColorToRGB(Background);
+  BR := GetRValue(BgRGB);
+  BG := GetGValue(BgRGB);
+  BB := GetBValue(BgRGB);
+  SetLength(SrcRows, S);
+
+  FOR Y := 0 TO DestH - 1 DO BEGIN
+    FOR I := 0 TO S - 1 DO
+      SrcRows[I] := Src.ScanLine[Y * S + I];
+    DestRow := Dest.ScanLine[DestTop + Y];
+    FOR X := 0 TO DestW - 1 DO BEGIN
+      SumR := 0;
+      SumG := 0;
+      SumB := 0;
+      FOR I := 0 TO S - 1 DO
+        FOR J := 0 TO S - 1 DO BEGIN
+          Inc(SumR, SrcRows[I][X * S + J].rgbtRed);
+          Inc(SumG, SrcRows[I][X * S + J].rgbtGreen);
+          Inc(SumB, SrcRows[I][X * S + J].rgbtBlue);
+        END;
+      DestRow[X].rgbtRed := Push(SumR, BR);
+      DestRow[X].rgbtGreen := Push(SumG, BG);
+      DestRow[X].rgbtBlue := Push(SumB, BB);
+    END;
+  END;
+END;
+
+// The original rendering: one solid bar per token, 120 columns squeezed into
+// the map width. Kept as Options.MinimapStyle = cmsBlocks.
+PROCEDURE TCodeEditor.PaintMinimapBlocks(CONST R: TRect; ScrollOffset: Integer;
+  CONST Colors: TCodeEditorThemeColors);
+VAR
   LineIndex         : Integer;
   FirstLine         : Integer;
   LastLine          : Integer;
-  ScrollOffset      : Integer;
+  RowH              : Integer;
   Y                 : Integer;
   LineText          : STRING;
   Trimmed           : STRING;
@@ -6350,9 +6793,54 @@ VAR
     X := MapColumn(FirstNonSpace);
     SegmentWidth := Max(2, Min(R.Right - X - 3, MulDiv(Length(Trimmed), R.Width - 8, 120)));
     Canvas.Brush.Color := LineColor;
-    Canvas.FillRect(Rect(X, Y, X + SegmentWidth, Min(Y + MinimapLineHeight - 1, R.Bottom)));
+    Canvas.FillRect(Rect(X, Y, X + SegmentWidth, Min(Y + RowH - 1, R.Bottom)));
   END;
 
+BEGIN
+  RowH := MinimapRowHeight;
+  IF IsDarkTheme(Colors) THEN
+    LineColor := ShiftBrightness(Colors.Text, -55)
+  ELSE
+    LineColor := ShiftBrightness(Colors.Text, 90);
+
+  FirstLine := Max(0, ScrollOffset DIV RowH);
+  LastLine := Min(FLines.Count - 1, (ScrollOffset + R.Height) DIV RowH + 1);
+  FOR LineIndex := FirstLine TO LastLine DO BEGIN
+    IF FLines.Count <= 0 THEN
+      Break;
+    Y := R.Top + LineIndex * RowH - ScrollOffset;
+    // Only skip rows that start past the bottom edge. Stopping early left an
+    // unpainted band that the minimap's own ScrollWindowEx then carried up
+    // into the map. The FillRects below already clamp to R.Bottom.
+    IF Y >= R.Bottom THEN
+      Continue;
+    LineText := FLines[LineIndex];
+
+    IF Assigned(FHighlighter) THEN BEGIN
+      Tokens := LineTokens(LineIndex);
+      IF Length(Tokens) = 0 THEN
+        PaintPlainLine
+      ELSE
+        FOR Token IN Tokens DO BEGIN
+          IF Token.Kind = tkWhitespace THEN
+            Continue;
+          Style := TokenStyleForTheme(Token.Kind, FHighlighter.Styles[Token.Kind], Colors);
+          TokenX := MapColumn(Token.Start - 1);
+          TokenWidth := Max(1, Min(R.Right - TokenX - 3, MulDiv(Token.Length, R.Width - 8, 120)));
+          Canvas.Brush.Color := Style.Foreground;
+          Canvas.FillRect(Rect(TokenX, Y, TokenX + TokenWidth, Min(Y + RowH - 1, R.Bottom)));
+        END;
+    END ELSE
+      PaintPlainLine;
+  END;
+END;
+
+PROCEDURE TCodeEditor.PaintMinimap;
+VAR
+  R                 : TRect;
+  ViewR             : TRect;
+  ThemeColors       : TCodeEditorThemeColors;
+  ScrollOffset      : Integer;
 BEGIN
   IF NOT MinimapVisible THEN
     Exit;
@@ -6363,53 +6851,22 @@ BEGIN
 
   ThemeColors := FPaintTheme;
   BEGIN
-    IF IsDarkTheme(ThemeColors) THEN
-      Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, 10)
-    ELSE
-      Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, -6);
-    Canvas.FillRect(R);
+    ScrollOffset := MinimapScrollOffset;
+    IF FOptions.MinimapStyle = cmsText THEN BEGIN
+      EnsureMinimapCache(R, ScrollOffset, ThemeColors);
+      BitBlt(Canvas.Handle, R.Left, R.Top, R.Width, R.Height, FMinimapCache.Canvas.Handle, 0, 0,
+        SRCCOPY);
+    END ELSE BEGIN
+      IF IsDarkTheme(ThemeColors) THEN
+        Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, 10)
+      ELSE
+        Canvas.Brush.Color := ShiftBrightness(ThemeColors.Background, -6);
+      Canvas.FillRect(R);
+      PaintMinimapBlocks(R, ScrollOffset, ThemeColors);
+    END;
     Canvas.Pen.Color := ThemeColors.GutterBorder;
     Canvas.MoveTo(R.Left, R.Top);
     Canvas.LineTo(R.Left, R.Bottom);
-
-    IF IsDarkTheme(ThemeColors) THEN
-      LineColor := ShiftBrightness(ThemeColors.Text, -55)
-    ELSE
-      LineColor := ShiftBrightness(ThemeColors.Text, 90);
-
-    ScrollOffset := MinimapScrollOffset;
-    FirstLine := Max(0, ScrollOffset DIV MinimapLineHeight);
-    LastLine := Min(FLines.Count - 1, (ScrollOffset + R.Height) DIV MinimapLineHeight + 1);
-    FOR LineIndex := FirstLine TO LastLine DO BEGIN
-      IF FLines.Count <= 0 THEN
-        Break;
-      Y := R.Top + LineIndex * MinimapLineHeight - ScrollOffset;
-      // Only skip rows that start past the bottom edge. Stopping 2px early left
-      // an unpainted band that the minimap's own ScrollWindowEx then carried up
-      // into the map - the same partial-row problem PaintedLineCount fixes for
-      // the text area. The FillRects below already clamp to R.Bottom.
-      IF Y >= R.Bottom THEN
-        Continue;
-      LineText := FLines[LineIndex];
-
-      IF Assigned(FHighlighter) THEN BEGIN
-        Tokens := LineTokens(LineIndex);
-        IF Length(Tokens) = 0 THEN
-          PaintPlainLine
-        ELSE
-          FOR Token IN Tokens DO BEGIN
-            IF Token.Kind = tkWhitespace THEN
-              Continue;
-            Style := TokenStyleForTheme(Token.Kind, FHighlighter.Styles[Token.Kind], ThemeColors);
-            TokenX := MapColumn(Token.Start - 1);
-            TokenWidth := Max(1, Min(R.Right - TokenX - 3, MulDiv(Token.Length, R.Width - 8, 120)));
-            Canvas.Brush.Color := Style.Foreground;
-            Canvas.FillRect(Rect(TokenX, Y, TokenX + TokenWidth,
-              Min(Y + MinimapLineHeight - 1, R.Bottom)));
-          END;
-      END ELSE
-        PaintPlainLine;
-    END;
 
     ViewR := MinimapViewportRect;
     Canvas.Brush.Style := bsClear;

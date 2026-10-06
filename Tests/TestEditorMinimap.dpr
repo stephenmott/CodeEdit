@@ -10,7 +10,7 @@ program TestEditorMinimap;
 
 uses
   System.SysUtils, System.Classes, Winapi.Windows, Winapi.Messages, Vcl.Forms,
-  Vcl.Controls, CodeEdit.Editor;
+  Vcl.Controls, Vcl.Graphics, CodeEdit.Editor;
 
 type
   TCracker = class(TCodeEditor);
@@ -67,6 +67,80 @@ begin
   Result := Line * 4 + 2;
 end;
 
+// Paints the editor into a bitmap and returns the minimap strip (the right
+// 200 px) as a fresh bitmap.
+function PaintMap: TBitmap;
+var
+  Full: TBitmap;
+begin
+  Full := TBitmap.Create;
+  try
+    Full.PixelFormat := pf24bit;
+    Full.SetSize(Ed.Width, Ed.Height);
+    Ed.PaintTo(Full.Canvas, 0, 0);
+    Result := TBitmap.Create;
+    Result.PixelFormat := pf24bit;
+    Result.SetSize(200, Ed.Height);
+    BitBlt(Result.Canvas.Handle, 0, 0, 200, Ed.Height, Full.Canvas.Handle, Ed.Width - 200, 0,
+      SRCCOPY);
+  finally
+    Full.Free;
+  end;
+end;
+
+function SameBitmap(A, B: TBitmap): Boolean;
+var
+  Y, X, Bad, FirstY: Integer;
+  RA, RB: PByte;
+begin
+  Result := (A.Width = B.Width) and (A.Height = B.Height);
+  if not Result then
+    Exit;
+  Bad := 0;
+  FirstY := -1;
+  for Y := 0 to A.Height - 1 do
+    if not CompareMem(A.ScanLine[Y], B.ScanLine[Y], A.Width * 3) then
+    begin
+      Inc(Bad);
+      if FirstY < 0 then
+      begin
+        FirstY := Y;
+        RA := A.ScanLine[Y];
+        RB := B.ScanLine[Y];
+        for X := 0 to A.Width * 3 - 1 do
+          if RA[X] <> RB[X] then
+          begin
+            WriteLn(Format('      first diff at y=%d x=%d (%d vs %d)', [Y, X div 3, RA[X], RB[X]]));
+            Break;
+          end;
+      end;
+    end;
+  if Bad > 0 then
+    WriteLn(Format('      %d differing rows, first at y=%d', [Bad, FirstY]));
+  Result := Bad = 0;
+end;
+
+// The map as painted after the pending incremental update, compared with the
+// same map after the cache is thrown away and rebuilt from scratch.
+function MapMatchesFullRender: Boolean;
+var
+  Incremental, Full: TBitmap;
+begin
+  Incremental := PaintMap;
+  try
+    Ed.Options.MinimapStyle := cmsBlocks;   // OptionsChanged invalidates the cache
+    Ed.Options.MinimapStyle := cmsText;
+    Full := PaintMap;
+    try
+      Result := SameBitmap(Incremental, Full);
+    finally
+      Full.Free;
+    end;
+  finally
+    Incremental.Free;
+  end;
+end;
+
 var
   I: Integer;
   Text: string;
@@ -85,6 +159,12 @@ begin
     Ed.Parent := Form;
     Ed.SetBounds(0, 0, 800, 600);
     Ed.Options.ShowMinimap := True;
+    Check(Ed.Options.MinimapRowHeight = 3, 'default minimap row height is 3');
+    Check(Ed.Options.MinimapStyle = cmsText, 'default minimap style is text');
+    Ed.Options.MinimapRowHeight := 4;   // MapY below assumes 4 px rows
+    Ed.Options.MinimapRowHeight := 1;   // clamps to 2
+    Check(Ed.Options.MinimapRowHeight = 2, 'row height clamps to 2');
+    Ed.Options.MinimapRowHeight := 4;
     Form.Show;
     Ed.HandleNeeded;
 
@@ -152,6 +232,57 @@ begin
     TCracker(Ed).MouseUp(mbLeft, [], MapX, MapY(30));
     Check(Ed.Caret.Line = 30, 'click still jumps with the preview off: ' +
       IntToStr(Ed.Caret.Line));
+
+    // 5b. Row height drives the click mapping: at 2 px rows, Y=MapY(60)=242
+    //     is line 121. Both renderers paint without error.
+    Ed.Lines.Text := Text;
+    Ed.TopLine := 0;
+    Ed.Options.MinimapRowHeight := 2;
+    Ed.Repaint;
+    TCracker(Ed).MouseDown(mbLeft, [ssLeft], MapX, MapY(60));
+    TCracker(Ed).MouseUp(mbLeft, [], MapX, MapY(60));
+    Check(Ed.Caret.Line = 121, '2 px rows: same Y maps to line 121: ' + IntToStr(Ed.Caret.Line));
+    Ed.Options.MinimapStyle := cmsBlocks;
+    Ed.Repaint;
+    Ed.Options.MinimapStyle := cmsText;
+    Ed.Options.MinimapRowHeight := 4;
+    Ed.TopLine := 0;
+    Ed.Repaint;
+    Ed.TopLine := 50;
+    Ed.Repaint;      // scrolled: exercises the cache shift + band render
+    Ed.Lines.Text := Text + 'more';
+    Ed.Repaint;      // text change: full re-render
+    Check(True, 'text and block renderers paint after scroll and edit');
+
+    // 5c. Incremental cache updates must produce the same pixels as a full
+    //     render, for edits, inserts and deletes in and above the visible map.
+    Ed.Lines.Text := Text;
+    Ed.TopLine := 100;
+    Ed.Options.MinimapRowHeight := 3;
+    PaintMap.Free;                              // establish the cache
+    Ed.Lines[150] := Ed.Lines[150] + ' // edited';
+    Check(MapMatchesFullRender, 'incremental: edit of a visible line');
+    Ed.Lines.Insert(140, 'procedure Inserted;');
+    Check(MapMatchesFullRender, 'incremental: line inserted in view');
+    Ed.Lines.Delete(145);
+    Check(MapMatchesFullRender, 'incremental: line deleted in view');
+    Ed.Lines[5] := 'changed above the map';
+    Check(MapMatchesFullRender, 'incremental: edit above the map');
+    Ed.Lines.Insert(2, 'inserted above the map');
+    Check(MapMatchesFullRender, 'incremental: insert above the map (shift)');
+    Ed.Lines.Delete(3);
+    Check(MapMatchesFullRender, 'incremental: delete above the map (shift)');
+    Ed.Lines.Insert(Ed.Lines.Count, 'appended at the end');
+    Check(MapMatchesFullRender, 'incremental: append below the map');
+    Ed.Lines.Insert(130, '');
+    Ed.Lines.Insert(130, 'two');
+    Ed.Lines.Insert(130, 'three');
+    Check(MapMatchesFullRender, 'incremental: three lines inserted at once');
+    Ed.Lines.Delete(130);
+    Ed.Lines.Delete(130);
+    Ed.Lines[131] := 'x';
+    Check(MapMatchesFullRender, 'incremental: deletes plus an edit');
+    Ed.Options.MinimapRowHeight := 4;
 
     // 6. Clicking below the map of a short file goes to the last line.
     Ed.Lines.Text := 'one' + sLineBreak + 'two' + sLineBreak + 'three';

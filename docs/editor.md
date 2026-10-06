@@ -60,6 +60,8 @@ fixed-pitch font — caret math is one column per character cell.
 | `ShowGutter` | `True` | Line-number gutter incl. breakpoint margin. |
 | `ShowMinimap` | `False` | VS Code-style file map on the right; drag it to scroll, click it to jump the caret to that line (shown two rows below the top of the view). |
 | `MinimapPreview` | `True` | Hovering the minimap pops up a full-size, syntax-coloured preview of 7 lines around the one under the mouse (that line is highlighted, in the middle). Clicking goes to it. |
+| `MinimapRowHeight` | `3` | Pixels per document line in the minimap (2..8). Smaller shows more of the file. |
+| `MinimapStyle` | `cmsText` | `cmsText` draws real shrunken text (bold glyphs rendered at 3x and averaged down, then contrast-boosted) so word shapes, lengths and token colours survive, like the Delphi 13 and VS Code maps; it is cached and re-rendered only when the text, theme, size or scroll position changes. `cmsBlocks` is the original solid-bar-per-token rendering. |
 | `TabSize` | `2` | Number of spaces the Tab key inserts, and the indent unit for `IndentSelection` / `UnindentSelection`. |
 | `ThemeSyntaxColors` | `True` | Re-map token colors to theme-appropriate palettes (separate dark/light sets) instead of using the highlighter's raw `Styles[]`. |
 
