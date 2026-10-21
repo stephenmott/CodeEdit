@@ -26,8 +26,8 @@ attribution is appreciated.
   line markers for debugger hosts — design-time editable, 1-based, edit-tracked
 - Undo/redo with typing coalescing that also restores breakpoints,
   execution line, and the `Modified` flag
-- Minimap (with hover preview), styled scrollbars, bracket matching,
-  occurrence highlighting
+- Word wrap (optionally indenting continuation rows), minimap (with hover
+  preview), styled scrollbars, bracket matching, occurrence highlighting
 - Printing: `TCodeEditorPrinter` with syntax colours, line numbers,
   header/footer macros, word wrap, print dialog and a built-in preview
 
@@ -108,7 +108,6 @@ editor directly.
 - Per-breakpoint enabled state and conditions
 - Diff-based undo storage and virtualized rendering for very large files
 - IME composition-window positioning
-- Word wrap
 - Diagnostics API (squiggles) and symbol navigation hooks
 - Possible Delphi 7 compatibility pass (the code currently uses unit
   namespaces, generics, character helpers, and VCL styles)

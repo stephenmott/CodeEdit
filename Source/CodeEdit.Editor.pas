@@ -79,6 +79,8 @@ TYPE
     FThemeSyntaxColors: Boolean;
     FShowGutter: Boolean;
     FTabSize: Integer;
+    FWordWrap: Boolean;
+    FWrapIndent: Boolean;
     FOnChange: TNotifyEvent;
     PROCEDURE SetBracketMatching(Value: Boolean);
     PROCEDURE SetLineCommentPrefix(CONST Value: STRING);
@@ -90,6 +92,8 @@ TYPE
     PROCEDURE SetThemeSyntaxColors(Value: Boolean);
     PROCEDURE SetShowGutter(Value: Boolean);
     PROCEDURE SetTabSize(Value: Integer);
+    PROCEDURE SetWordWrap(Value: Boolean);
+    PROCEDURE SetWrapIndent(Value: Boolean);
   PROTECTED
     PROCEDURE Changed;
   PUBLIC
@@ -112,6 +116,13 @@ TYPE
     PROPERTY TabSize: Integer READ FTabSize WRITE SetTabSize DEFAULT 2;
     PROPERTY ThemeSyntaxColors: Boolean READ FThemeSyntaxColors WRITE SetThemeSyntaxColors DEFAULT
       True;
+    // Wrap long lines at the text area's right edge (after the last blank
+    // that fits, else cut at the width). No horizontal scrolling while on;
+    // Up/Down move by visual row, Home/End still work on the whole line.
+    PROPERTY WordWrap: Boolean READ FWordWrap WRITE SetWordWrap DEFAULT False;
+    // Start a wrapped line's continuation rows under its first non-blank
+    // character (code), rather than at the left margin (logs).
+    PROPERTY WrapIndent: Boolean READ FWrapIndent WRITE SetWrapIndent DEFAULT True;
     PROPERTY OnChange: TNotifyEvent READ FOnChange WRITE FOnChange;
   END;
 
@@ -275,10 +286,23 @@ TYPE
     FThemeMode: TCodeEditorThemeMode;
     FCaret: TCodePosition;
     FAnchor: TCodePosition;
-    FTopLine: Integer;
+    FTopRow: Integer;                 // first visible row (= line unless word wrap is on)
     FLeftColumn: Integer;
     FLineHeight: Integer;
     FCharWidth: Integer;
+    // Word-wrap row map, see EnsureWrapMap. Empty / FWrapValid=False when off.
+    FWrapValid: Boolean;
+    FWrapCols: Integer;
+    FWrapIndentUsed: Boolean;
+    FRowLine: TArray<Integer>;        // per visual row: its document line
+    FRowStart: TArray<Integer>;       // per visual row: first column of the line it shows
+    FLineFirstRow: TArray<Integer>;   // per line: its first row; [Count] = total rows
+    // Row being painted (set by PaintText for the per-line painters).
+    FPaintTextLeft: Integer;
+    FPaintRowStart: Integer;
+    FPaintRowEnd: Integer;
+    FPaintRowIndent: Integer;
+    FPaintRowLast: Boolean;
     FGutterWidth: Integer;
     FUndoStack: TStack<TCodeUndoItem>;
     FRedoStack: TStack<TCodeUndoItem>;
@@ -390,6 +414,27 @@ TYPE
     FUNCTION ActiveTheme: TCodeEditorThemeColors;
     FUNCTION GetLines: TStrings;
     FUNCTION ClientTextRect: TRect;
+    FUNCTION Wrapping: Boolean;
+    FUNCTION WrapColumns: Integer;
+    FUNCTION LineWrapIndent(Line, Cols: Integer): Integer;
+    PROCEDURE EnsureWrapMap;
+    FUNCTION RowCount: Integer;
+    FUNCTION MaxTopRow: Integer;
+    FUNCTION LineFirstRow(Line: Integer): Integer;
+    FUNCTION LineRowCount(Line: Integer): Integer;
+    FUNCTION RowToLine(Row: Integer): Integer;
+    FUNCTION RowStartColumn(Row: Integer): Integer;
+    FUNCTION RowEndColumn(Row: Integer): Integer;
+    FUNCTION IsLastRowOfLine(Row: Integer): Boolean;
+    FUNCTION RowIndent(Row: Integer): Integer;
+    FUNCTION PositionToRow(CONST Position: TCodePosition): Integer;
+    FUNCTION VisualColumn(CONST Position: TCodePosition): Integer;
+    FUNCTION RowPositionAt(Row, AVisualColumn: Integer): TCodePosition;
+    FUNCTION VisibleDocumentLineCount: Integer;
+    FUNCTION GetTopLine: Integer;
+    PROCEDURE SetTopRow(Value: Integer);
+    FUNCTION ColumnX(Column: Integer): Integer;
+    FUNCTION ColumnInRow(Column: Integer): Boolean;
     FUNCTION MinimapVisible: Boolean;
     FUNCTION MinimapRect: TRect;
     FUNCTION MinimapContentHeight: Integer;
@@ -576,9 +621,9 @@ TYPE
     PROCEDURE PaintMultipleCaretsLine(ALineIndex, Y: Integer);
     PROCEDURE PaintBracketMatchesLine(ALineIndex, Y: Integer; CONST OpenPos, ClosePos:
       TCodePosition);
-    PROCEDURE PaintLineTokens(ALineIndex, X, Y: Integer; CONST LineText: STRING; ForcedColor:
+    PROCEDURE PaintLineTokens(ALineIndex, Y: Integer; CONST LineText: STRING; ForcedColor:
       TColor);
-    PROCEDURE PaintSelectedTextLine(ALineIndex, X, Y: Integer; CONST LineText: STRING);
+    PROCEDURE PaintSelectedTextLine(ALineIndex, Y: Integer; CONST LineText: STRING);
     PROCEDURE PaintLineTokensTo(ACanvas: TCanvas; ALineIndex, X, Y: Integer;
       CONST LineText: STRING; CONST Colors: TCodeEditorThemeColors);
     PROCEDURE CMFontChanged(VAR Message: TMessage); MESSAGE CM_FONTCHANGED;
@@ -669,7 +714,9 @@ TYPE
     PROPERTY ExecutionLine: Integer READ FExecutionLine WRITE SetExecutionLine;
     PROPERTY LeftColumn: Integer READ FLeftColumn WRITE SetLeftColumn;
     PROPERTY SelectedText: STRING READ GetSelectedText WRITE SetSelectedText;
-    PROPERTY TopLine: Integer READ FTopLine WRITE SetTopLine;
+    // With word wrap on, reading gives the line of the first visible row and
+    // writing scrolls that line's first row to the top.
+    PROPERTY TopLine: Integer READ GetTopLine WRITE SetTopLine;
   PUBLISHED
     PROPERTY Align;
     PROPERTY Anchors;
@@ -769,6 +816,8 @@ CONST
   MinimapPreviewDelayMs = 120;      // dwell before the preview first appears
   MinimapClickTopGap = 2;           // rows kept above the line a minimap click jumps to
   CaretJumpMinContextRows = 2;      // least context above a programmatic caret jump (SetCaret)
+  MinWrapColumns = 10;              // narrowest the word-wrap width is allowed to go
+  MinWrapTail = 8;                  // continuation rows keep at least this many cells after the indent
   StyledScrollBarSize = 12;
   DefaultMaxPasteBytes = 64 * 1024 * 1024;
   MinZoomPercent    = 25;
@@ -882,6 +931,8 @@ BEGIN
   FMaxPasteBytes := DefaultMaxPasteBytes;
   FThemeSyntaxColors := True;
   FTabSize := 2;
+  FWordWrap := False;
+  FWrapIndent := True;
 END;
 
 PROCEDURE TCodeEditorOptions.Changed;
@@ -903,6 +954,8 @@ BEGIN
     FMaxPasteBytes := TCodeEditorOptions(Source).MaxPasteBytes;
     FTabSize := TCodeEditorOptions(Source).TabSize;
     FThemeSyntaxColors := TCodeEditorOptions(Source).ThemeSyntaxColors;
+    FWordWrap := TCodeEditorOptions(Source).WordWrap;
+    FWrapIndent := TCodeEditorOptions(Source).WrapIndent;
     Changed;
   END ELSE
     INHERITED;
@@ -970,6 +1023,22 @@ PROCEDURE TCodeEditorOptions.SetMinimapStyle(Value: TCodeMinimapStyle);
 BEGIN
   IF FMinimapStyle <> Value THEN BEGIN
     FMinimapStyle := Value;
+    Changed;
+  END;
+END;
+
+PROCEDURE TCodeEditorOptions.SetWordWrap(Value: Boolean);
+BEGIN
+  IF FWordWrap <> Value THEN BEGIN
+    FWordWrap := Value;
+    Changed;
+  END;
+END;
+
+PROCEDURE TCodeEditorOptions.SetWrapIndent(Value: Boolean);
+BEGIN
+  IF FWrapIndent <> Value THEN BEGIN
+    FWrapIndent := Value;
     Changed;
   END;
 END;
@@ -1288,7 +1357,7 @@ BEGIN
   FReadOnly := False;
   FCaret := TCodePosition.Create(0, 0);
   FAnchor := FCaret;
-  FTopLine := 0;
+  FTopRow := 0;
   FLeftColumn := 0;
 
   FHoverMouse := Point(-1, -1);
@@ -1513,11 +1582,11 @@ BEGIN
     Exit;
   END;
   DeltaLines := Mouse.WheelScrollLines * -Sign(Message.WheelDelta);
-  NewTop := EnsureRange(FTopLine + DeltaLines, 0, Max(0, FLines.Count - VisibleLineCount));
-  IF NewTop = FTopLine THEN
+  NewTop := EnsureRange(FTopRow + DeltaLines, 0, MaxTopRow);
+  IF NewTop = FTopRow THEN
     Exit;
-  OldTop := FTopLine;
-  FTopLine := NewTop;
+  OldTop := FTopRow;
+  FTopRow := NewTop;
   UpdateScrollBars;
   ScrollViewport(OldTop);
 END;
@@ -1529,7 +1598,7 @@ VAR
   Info              : TScrollInfo;
 BEGIN
   INHERITED;
-  NewTop := FTopLine;
+  NewTop := FTopRow;
   CASE Message.ScrollCode OF
     SB_LINEUP: Dec(NewTop);
     SB_LINEDOWN: Inc(NewTop);
@@ -1547,11 +1616,11 @@ BEGIN
       END;
   END;
 
-  NewTop := EnsureRange(NewTop, 0, Max(0, FLines.Count - VisibleLineCount));
-  IF NewTop = FTopLine THEN
+  NewTop := EnsureRange(NewTop, 0, MaxTopRow);
+  IF NewTop = FTopRow THEN
     Exit;
-  OldTop := FTopLine;
-  FTopLine := NewTop;
+  OldTop := FTopRow;
+  FTopRow := NewTop;
   UpdateScrollBars;
   UpdateCaret;
   ScrollViewport(OldTop);
@@ -1643,16 +1712,23 @@ BEGIN
   Info.nMin := 0;
 
   IF FScrollBars IN [ssVertical, ssBoth] THEN BEGIN
-    Info.nMax := Max(0, FLines.Count - 1);
+    Info.nMax := Max(0, RowCount - 1);
     Info.nPage := VisibleLineCount;
-    Info.nPos := FTopLine;
+    Info.nPos := FTopRow;
     SetScrollInfo(Handle, SB_VERT, Info, True);
   END;
 
   IF FScrollBars IN [ssHorizontal, ssBoth] THEN BEGIN
-    Info.nMax := Max(0, MaxLineLength);
-    Info.nPage := VisibleColumnCount;
-    Info.nPos := FLeftColumn;
+    IF Wrapping THEN BEGIN
+      // Nothing to scroll sideways: an empty range disables the bar.
+      Info.nMax := 0;
+      Info.nPage := 1;
+      Info.nPos := 0;
+    END ELSE BEGIN
+      Info.nMax := Max(0, MaxLineLength);
+      Info.nPage := VisibleColumnCount;
+      Info.nPos := FLeftColumn;
+    END;
     SetScrollInfo(Handle, SB_HORZ, Info, True);
   END;
 END;
@@ -1685,18 +1761,21 @@ END;
 PROCEDURE TCodeEditor.InvalidateTextLines(FirstLine, LastLine: Integer);
 VAR
   R                 : TRect;
+  FirstRow          : Integer;
+  LastRow           : Integer;
 BEGIN
   IF NOT HandleAllocated THEN
     Exit;
-  // Clamp the absolute line range to the viewport; each visible row I occupies
-  // the pixel band [I*FLineHeight, (I+1)*FLineHeight] (PaintText draws at I*LH+1).
-  FirstLine := Max(FirstLine, FTopLine);
-  LastLine := Min(LastLine, FTopLine + VisibleLineCount);
-  IF LastLine < FirstLine THEN
+  // Every row of the lines, clamped to the viewport; each visible row I
+  // occupies the pixel band [I*FLineHeight, (I+1)*FLineHeight] (PaintText
+  // draws at I*LH+1).
+  FirstRow := Max(LineFirstRow(FirstLine), FTopRow);
+  LastRow := Min(LineFirstRow(LastLine) + LineRowCount(LastLine) - 1, FTopRow + VisibleLineCount);
+  IF LastRow < FirstRow THEN
     Exit;
   R := ClientTextRect;
-  R.Top := Max(R.Top, (FirstLine - FTopLine) * FLineHeight);
-  R.Bottom := Min(R.Bottom, (LastLine - FTopLine + 1) * FLineHeight + 1);
+  R.Top := Max(R.Top, (FirstRow - FTopRow) * FLineHeight);
+  R.Bottom := Min(R.Bottom, (LastRow - FTopRow + 1) * FLineHeight + 1);
   IF R.Bottom > R.Top THEN
     Winapi.Windows.InvalidateRect(Handle, @R, False);
 END;
@@ -1719,6 +1798,305 @@ BEGIN
     Dec(Result.Right, StyledScrollBarSize);
   IF StyledHorizontalVisible THEN
     Dec(Result.Bottom, StyledScrollBarSize);
+END;
+
+{ Word wrap: visual rows.
+
+  With Options.WordWrap off a visual row IS a document line and every helper
+  below collapses to the identity, so the rest of the editor is written once,
+  in rows. With it on, FRowLine[Row]/FRowStart[Row] give each row's line and
+  first column, and FLineFirstRow[Line] the row a line starts on (with
+  FLineFirstRow[Count] = RowCount). FTopRow, the scroll position, is always a
+  row. A column that sits exactly on a row break belongs to the row that
+  starts there (PositionToRow), so typing at the end of a full row continues
+  on the next one. }
+
+FUNCTION TCodeEditor.Wrapping: Boolean;
+BEGIN
+  Result := Assigned(FOptions) AND FOptions.WordWrap AND (FCharWidth > 0);
+END;
+
+FUNCTION TCodeEditor.WrapColumns: Integer;
+BEGIN
+  // One cell short of the width so the caret after a full row stays inside.
+  Result := Max(MinWrapColumns, ClientTextRect.Width DIV Max(1, FCharWidth) - 1);
+END;
+
+// Cells a wrapped line's continuation rows are indented by: its leading
+// blanks (tabs count one cell, as they are drawn), unless that would leave
+// too little room, in which case continuation rows start at the margin.
+FUNCTION TCodeEditor.LineWrapIndent(Line, Cols: Integer): Integer;
+VAR
+  S                 : STRING;
+  P                 : Integer;
+BEGIN
+  Result := 0;
+  IF NOT FOptions.WrapIndent OR (Line < 0) OR (Line >= FLines.Count) THEN
+    Exit;
+  S := FLines[Line];
+  P := 1;
+  WHILE (P <= Length(S)) AND ((S[P] = ' ') OR (S[P] = #9)) DO
+    Inc(P);
+  Result := P - 1;
+  IF Result > Cols - MinWrapTail THEN
+    Result := 0;
+END;
+
+PROCEDURE TCodeEditor.EnsureWrapMap;
+VAR
+  Cols              : Integer;
+  Count             : Integer;
+  I                 : Integer;
+  L                 : Integer;
+  Start             : Integer;
+  Avail             : Integer;
+  BreakAt           : Integer;
+  P                 : Integer;
+  Indent            : Integer;
+  RowIdx            : Integer;
+  S                 : STRING;
+  WantIndent        : Boolean;
+
+  PROCEDURE AddRow(ALine, AStart: Integer);
+  BEGIN
+    IF RowIdx >= Length(FRowLine) THEN BEGIN
+      SetLength(FRowLine, Max(64, Length(FRowLine) * 2));
+      SetLength(FRowStart, Length(FRowLine));
+    END;
+    FRowLine[RowIdx] := ALine;
+    FRowStart[RowIdx] := AStart;
+    Inc(RowIdx);
+  END;
+
+BEGIN
+  IF NOT Wrapping THEN BEGIN
+    IF FWrapValid THEN BEGIN
+      FRowLine := NIL;
+      FRowStart := NIL;
+      FLineFirstRow := NIL;
+      FWrapValid := False;
+    END;
+    Exit;
+  END;
+
+  Cols := WrapColumns;
+  WantIndent := FOptions.WrapIndent;
+  Count := FLines.Count;
+  // Geometry changes (resize, zoom, gutter width, the indent option) are
+  // caught here; text changes invalidate in LinesChanged. The line-count
+  // check keeps a map that is stale inside a BeginUpdate batch from mapping
+  // rows to lines that no longer exist.
+  IF FWrapValid AND (FWrapCols = Cols) AND (FWrapIndentUsed = WantIndent) AND
+    (Length(FLineFirstRow) = Count + 1) THEN
+    Exit;
+
+  SetLength(FLineFirstRow, Count + 1);
+  IF Length(FRowLine) < Count THEN BEGIN
+    SetLength(FRowLine, Count + 64);
+    SetLength(FRowStart, Count + 64);
+  END;
+  RowIdx := 0;
+  FOR I := 0 TO Count - 1 DO BEGIN
+    FLineFirstRow[I] := RowIdx;
+    AddRow(I, 0);
+    S := FLines[I];
+    L := Length(S);
+    IF L <= Cols THEN
+      Continue;
+
+    Indent := 0;
+    IF WantIndent THEN
+      Indent := LineWrapIndent(I, Cols);
+    Start := 0;
+    Avail := Cols;                      // the first row has the full width
+    WHILE L - Start > Avail DO BEGIN
+      // Break after the last blank that fits, so the next row starts on a
+      // word; a row with no blank is cut at the width. Each row keeps at
+      // least one character (P stops at Start + 2).
+      BreakAt := 0;
+      FOR P := Start + Avail DOWNTO Start + 2 DO
+        IF (S[P] = ' ') OR (S[P] = #9) THEN BEGIN
+          BreakAt := P;
+          Break;
+        END;
+      IF BreakAt = 0 THEN
+        BreakAt := Start + Avail;
+      Start := BreakAt;                 // 0-based first column of the next row
+      AddRow(I, Start);
+      Avail := Cols - Indent;
+    END;
+  END;
+  FLineFirstRow[Count] := RowIdx;
+  SetLength(FRowLine, RowIdx);
+  SetLength(FRowStart, RowIdx);
+  FWrapValid := True;
+  FWrapCols := Cols;
+  FWrapIndentUsed := WantIndent;
+END;
+
+FUNCTION TCodeEditor.RowCount: Integer;
+BEGIN
+  EnsureWrapMap;
+  IF FWrapValid THEN
+    Result := FLineFirstRow[FLines.Count]
+  ELSE
+    Result := FLines.Count;
+END;
+
+FUNCTION TCodeEditor.MaxTopRow: Integer;
+BEGIN
+  Result := Max(0, RowCount - VisibleLineCount);
+END;
+
+FUNCTION TCodeEditor.LineFirstRow(Line: Integer): Integer;
+BEGIN
+  EnsureWrapMap;
+  Line := EnsureRange(Line, 0, Max(0, FLines.Count - 1));
+  IF FWrapValid THEN
+    Result := FLineFirstRow[Line]
+  ELSE
+    Result := Line;
+END;
+
+FUNCTION TCodeEditor.LineRowCount(Line: Integer): Integer;
+BEGIN
+  EnsureWrapMap;
+  IF FWrapValid AND (Line >= 0) AND (Line < FLines.Count) THEN
+    Result := FLineFirstRow[Line + 1] - FLineFirstRow[Line]
+  ELSE
+    Result := 1;
+END;
+
+FUNCTION TCodeEditor.RowToLine(Row: Integer): Integer;
+BEGIN
+  EnsureWrapMap;
+  IF FWrapValid AND (Length(FRowLine) > 0) THEN
+    Result := FRowLine[EnsureRange(Row, 0, High(FRowLine))]
+  ELSE
+    Result := Row;
+  Result := EnsureRange(Result, 0, Max(0, FLines.Count - 1));
+END;
+
+FUNCTION TCodeEditor.RowStartColumn(Row: Integer): Integer;
+BEGIN
+  EnsureWrapMap;
+  IF FWrapValid AND (Row >= 0) AND (Row <= High(FRowStart)) THEN
+    Result := FRowStart[Row]
+  ELSE
+    Result := 0;
+END;
+
+FUNCTION TCodeEditor.IsLastRowOfLine(Row: Integer): Boolean;
+BEGIN
+  EnsureWrapMap;
+  Result := NOT FWrapValid OR (Row < 0) OR (Row >= High(FRowLine)) OR
+    (FRowLine[Row + 1] <> FRowLine[Row]);
+END;
+
+// One past the last column the row shows: the next row's start, or the
+// line's length for its last row.
+FUNCTION TCodeEditor.RowEndColumn(Row: Integer): Integer;
+VAR
+  Line              : Integer;
+BEGIN
+  IF IsLastRowOfLine(Row) THEN BEGIN
+    Line := RowToLine(Row);
+    IF (Line >= 0) AND (Line < FLines.Count) THEN
+      Result := Length(FLines[Line])
+    ELSE
+      Result := 0;
+  END ELSE
+    Result := FRowStart[Row + 1];
+END;
+
+FUNCTION TCodeEditor.RowIndent(Row: Integer): Integer;
+BEGIN
+  Result := 0;
+  IF FWrapValid AND (RowStartColumn(Row) > 0) THEN
+    Result := LineWrapIndent(RowToLine(Row), FWrapCols);
+END;
+
+FUNCTION TCodeEditor.PositionToRow(CONST Position: TCodePosition): Integer;
+VAR
+  Line              : Integer;
+  Last              : Integer;
+BEGIN
+  EnsureWrapMap;
+  Line := EnsureRange(Position.Line, 0, Max(0, FLines.Count - 1));
+  IF NOT FWrapValid THEN
+    Exit(Line);
+  Result := FLineFirstRow[Line];
+  Last := FLineFirstRow[Line + 1] - 1;
+  WHILE (Result < Last) AND (FRowStart[Result + 1] <= Position.Column) DO
+    Inc(Result);
+END;
+
+// The column as drawn: offset within its row plus the continuation indent.
+FUNCTION TCodeEditor.VisualColumn(CONST Position: TCodePosition): Integer;
+VAR
+  Row               : Integer;
+BEGIN
+  Row := PositionToRow(Position);
+  Result := Position.Column - RowStartColumn(Row) + RowIndent(Row);
+END;
+
+// Inverse of VisualColumn for one row, clamped into that row. On a row that
+// is not its line's last, the break column is excluded: it belongs to the
+// next row and would make the caret appear to jump there.
+FUNCTION TCodeEditor.RowPositionAt(Row, AVisualColumn: Integer): TCodePosition;
+VAR
+  StartCol          : Integer;
+  EndCol            : Integer;
+BEGIN
+  Result.Line := RowToLine(Row);
+  StartCol := RowStartColumn(Row);
+  EndCol := RowEndColumn(Row);
+  IF NOT IsLastRowOfLine(Row) THEN
+    Dec(EndCol);
+  Result.Column := EnsureRange(StartCol + AVisualColumn - RowIndent(Row), StartCol,
+    Max(StartCol, EndCol));
+END;
+
+// Document lines with at least one row in view (the minimap's viewport box).
+FUNCTION TCodeEditor.VisibleDocumentLineCount: Integer;
+BEGIN
+  IF NOT Wrapping THEN
+    Exit(VisibleLineCount);
+  Result := Max(1, RowToLine(Min(RowCount - 1, FTopRow + VisibleLineCount - 1)) -
+    RowToLine(FTopRow) + 1);
+END;
+
+FUNCTION TCodeEditor.GetTopLine: Integer;
+BEGIN
+  Result := RowToLine(FTopRow);
+END;
+
+PROCEDURE TCodeEditor.SetTopRow(Value: Integer);
+VAR
+  OldTop            : Integer;
+BEGIN
+  Value := EnsureRange(Value, 0, MaxTopRow);
+  IF FTopRow = Value THEN
+    Exit;
+  OldTop := FTopRow;
+  FTopRow := Value;
+  UpdateScrollBars;
+  UpdateCaret;
+  ScrollViewport(OldTop);
+END;
+
+// X of a column on the row being painted (see the FPaintRow* fields).
+FUNCTION TCodeEditor.ColumnX(Column: Integer): Integer;
+BEGIN
+  Result := FPaintTextLeft + (Column - FPaintRowStart + FPaintRowIndent - FLeftColumn) * FCharWidth;
+END;
+
+// Whether a caret-like column (a gap between characters) is shown on the row
+// being painted: the row's end gap only on its line's last row.
+FUNCTION TCodeEditor.ColumnInRow(Column: Integer): Boolean;
+BEGIN
+  Result := (Column >= FPaintRowStart) AND
+    ((Column < FPaintRowEnd) OR (FPaintRowLast AND (Column = FPaintRowEnd)));
 END;
 
 FUNCTION TCodeEditor.MinimapVisible: Boolean;
@@ -1762,8 +2140,9 @@ BEGIN
   IF MaxOffset = 0 THEN
     Exit(0);
 
-  MaxTopLine := Max(1, FLines.Count - VisibleLineCount);
-  Result := MulDiv(EnsureRange(FTopLine, 0, MaxTopLine), MaxOffset, MaxTopLine);
+  // In document lines: the map is drawn per line even when the view wraps.
+  MaxTopLine := Max(1, RowToLine(MaxTopRow));
+  Result := MulDiv(EnsureRange(TopLine, 0, MaxTopLine), MaxOffset, MaxTopLine);
 END;
 
 FUNCTION TCodeEditor.MinimapViewportRect: TRect;
@@ -1778,9 +2157,9 @@ BEGIN
     Exit;
 
   ScrollOffset := MinimapScrollOffset;
-  ViewHeight := Max(8, VisibleLineCount * MinimapRowHeight);
+  ViewHeight := Max(8, VisibleDocumentLineCount * MinimapRowHeight);
   ViewHeight := Min(ViewHeight, R.Height);
-  Result.Top := R.Top + FTopLine * MinimapRowHeight - ScrollOffset;
+  Result.Top := R.Top + TopLine * MinimapRowHeight - ScrollOffset;
   Result.Top := EnsureRange(Result.Top, R.Top, Max(R.Top, R.Bottom - ViewHeight));
   Result.Bottom := Result.Top + ViewHeight;
 END;
@@ -1798,9 +2177,8 @@ BEGIN
 
   ScrollOffset := MinimapScrollOffset;
   TargetLine := (ScrollOffset + EnsureRange(Y - R.Top, 0, R.Height)) DIV MinimapRowHeight;
-  OldTop := FTopLine;
-  FTopLine := TargetLine - VisibleLineCount DIV 2;
-  FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
+  OldTop := FTopRow;
+  FTopRow := EnsureRange(LineFirstRow(TargetLine) - VisibleLineCount DIV 2, 0, MaxTopRow);
   UpdateScrollBars;
   UpdateCaret;
   ScrollViewport(OldTop);
@@ -1935,7 +2313,7 @@ VAR
   END;
 
 BEGIN
-  Delta := FTopLine - OldTopLine;
+  Delta := FTopRow - OldTopLine;
   IF Delta = 0 THEN
     Exit;
   IF NOT HandleAllocated OR (Abs(Delta) >= VisibleLineCount) THEN BEGIN
@@ -1952,11 +2330,11 @@ BEGIN
     SW_INVALIDATE);
 
   // Minimap state as it was before the move.
-  SaveTop := FTopLine;
-  FTopLine := OldTopLine;
+  SaveTop := FTopRow;
+  FTopRow := OldTopLine;
   OldOffset := MinimapScrollOffset;
   OldViewport := MinimapViewportRect;
-  FTopLine := SaveTop;
+  FTopRow := SaveTop;
 
   IF MinimapVisible THEN BEGIN
     MapR := MinimapRect;
@@ -1991,7 +2369,7 @@ END;
 
 FUNCTION TCodeEditor.StyledHorizontalVisible: Boolean;
 BEGIN
-  Result := FStyledScrollBars AND (FScrollBars IN [ssHorizontal, ssBoth]);
+  Result := FStyledScrollBars AND (FScrollBars IN [ssHorizontal, ssBoth]) AND NOT Wrapping;
 END;
 
 FUNCTION TCodeEditor.MaxLineLength: Integer;
@@ -2026,13 +2404,13 @@ VAR
   Travel            : Integer;
 BEGIN
   Track := StyledVerticalScrollRect;
-  IF FLines.Count <= VisibleLineCount THEN
+  IF RowCount <= VisibleLineCount THEN
     Exit(Rect(Track.Left, Track.Top, Track.Right, Track.Top));
 
-  ThumbHeight := Max(24, MulDiv(Track.Height, VisibleLineCount, FLines.Count));
-  MaxTopLine := Max(1, FLines.Count - VisibleLineCount);
+  ThumbHeight := Max(24, MulDiv(Track.Height, VisibleLineCount, RowCount));
+  MaxTopLine := Max(1, MaxTopRow);
   Travel := Max(1, Track.Height - ThumbHeight);
-  Result.Top := Track.Top + MulDiv(FTopLine, Travel, MaxTopLine);
+  Result.Top := Track.Top + MulDiv(FTopRow, Travel, MaxTopLine);
   Result.Bottom := Result.Top + ThumbHeight;
   Result.Left := Track.Left;
   Result.Right := Track.Right;
@@ -2148,17 +2526,19 @@ VAR
   R                 : TRect;
 BEGIN
   R := ClientTextRect;
-  Result.X := R.Left + (Position.Column - FLeftColumn) * FCharWidth;
-  Result.Y := (Position.Line - FTopLine) * FLineHeight;
+  Result.X := R.Left + (VisualColumn(Position) - FLeftColumn) * FCharWidth;
+  Result.Y := (PositionToRow(Position) - FTopRow) * FLineHeight;
 END;
 
 FUNCTION TCodeEditor.PointToCaret(CONST Point: TPoint): TCodePosition;
 VAR
   R                 : TRect;
+  Row               : Integer;
 BEGIN
   R := ClientTextRect;
-  Result.Line := FTopLine + EnsureRange(Point.Y DIV FLineHeight, 0, Max(0, FLines.Count - 1));
-  Result.Column := FLeftColumn + Max(0, (Point.X - R.Left + FCharWidth DIV 2) DIV FCharWidth);
+  Row := EnsureRange(FTopRow + Point.Y DIV FLineHeight, 0, Max(0, RowCount - 1));
+  Result := RowPositionAt(Row,
+    FLeftColumn + Max(0, (Point.X - R.Left + FCharWidth DIV 2) DIV FCharWidth));
   Result := NormalizePosition(Result);
 END;
 
@@ -4219,17 +4599,8 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditor.SetTopLine(Value: Integer);
-VAR
-  OldTop            : Integer;
 BEGIN
-  Value := EnsureRange(Value, 0, Max(0, FLines.Count - VisibleLineCount));
-  IF FTopLine = Value THEN
-    Exit;
-  OldTop := FTopLine;
-  FTopLine := Value;
-  UpdateScrollBars;
-  UpdateCaret;
-  ScrollViewport(OldTop);
+  SetTopRow(LineFirstRow(Value));
 END;
 
 FUNCTION TCodeEditor.GetLines: TStrings;
@@ -4255,6 +4626,8 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditor.SetCaret(Value: TCodePosition);
+VAR
+  CaretRow          : Integer;
 BEGIN
   FinishUndoGroup;
   FDesiredColumn := -1;
@@ -4267,9 +4640,10 @@ BEGIN
   // header when the caret is put on the first line of the body - stays in
   // sight. Keyboard and mouse moves go through MoveCaret and still scroll by
   // the minimum.
-  IF (FCaret.Line < FTopLine) OR (FCaret.Line >= FTopLine + VisibleLineCount) THEN
-    FTopLine := EnsureRange(FCaret.Line - Max(CaretJumpMinContextRows, VisibleLineCount DIV 4),
-      0, Max(0, FLines.Count - VisibleLineCount));
+  CaretRow := PositionToRow(FCaret);
+  IF (CaretRow < FTopRow) OR (CaretRow >= FTopRow + VisibleLineCount) THEN
+    FTopRow := EnsureRange(CaretRow - Max(CaretJumpMinContextRows, VisibleLineCount DIV 4),
+      0, MaxTopRow);
   EnsureCaretVisible;
   Invalidate;
   DoCaretChange;
@@ -4278,6 +4652,8 @@ END;
 
 PROCEDURE TCodeEditor.SetLeftColumn(Value: Integer);
 BEGIN
+  IF Wrapping THEN
+    Value := 0;                         // no sideways scrolling while wrapping
   Value := EnsureRange(Value, 0, Max(0, MaxLineLength - VisibleColumnCount + 1));
   IF FLeftColumn = Value THEN
     Exit;
@@ -4326,10 +4702,12 @@ BEGIN
   // gets it clamped and then moved again (the Backspace double-step bug).
   FCaret := NormalizePosition(FCaret);
   FAnchor := NormalizePosition(FAnchor);
+  FWrapValid := False;                  // the row map is rebuilt on demand (gutter width first: it sets the wrap width)
+  UpdateGutterWidth;
   // FLineHeight is still 0 while the constructor's FLines.Add('') fires this,
   // and VisibleLineCount divides by it.
-  IF (FTopLine > 0) AND (FLineHeight > 0) THEN
-    FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
+  IF (FTopRow > 0) AND (FLineHeight > 0) THEN
+    FTopRow := EnsureRange(FTopRow, 0, MaxTopRow);
 
   FMaxLineLengthValid := False;
   FDesiredColumn := -1;
@@ -4337,7 +4715,6 @@ BEGIN
   // top; EnsureLineStates reuses cached entries, so this is cheap.
   FStateChainValid := 0;
   MarkMinimapCacheDirty;
-  UpdateGutterWidth;
   UpdateScrollBars;
   IF NOT FApplyingUndo THEN BEGIN
     DoEditStateChanged;
@@ -4353,7 +4730,14 @@ END;
 PROCEDURE TCodeEditor.OptionsChanged(Sender: TObject);
 BEGIN
   UpdateMetrics;
+  // WordWrap / WrapIndent / gutter / minimap all change the row map; it is
+  // rebuilt lazily. Wrapping forgets any sideways scroll and keeps the caret
+  // row in view, since the caret's row may have moved a long way.
+  FWrapValid := False;
+  IF Wrapping THEN
+    FLeftColumn := 0;
   UpdateScrollBars;
+  EnsureCaretVisible;
   InvalidateMinimapCache;
   Invalidate;
 END;
@@ -4519,9 +4903,9 @@ BEGIN
   // SetCaret leaves about a quarter of a view above the caret, which a long
   // var/const section can exceed. Pull the view up so the header shows with a
   // couple of rows above it, unless that would push the caret off the bottom.
-  NewTop := Max(0, HeaderLine - CaretJumpMinContextRows);
-  IF FTopLine > NewTop THEN
-    SetTopLine(Max(NewTop, Target - VisibleLineCount + 1));
+  NewTop := Max(0, LineFirstRow(HeaderLine) - CaretJumpMinContextRows);
+  IF FTopRow > NewTop THEN
+    SetTopRow(Max(NewTop, PositionToRow(FCaret) - VisibleLineCount + 1));
   Result := Target;
 END;
 
@@ -4961,14 +5345,19 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditor.EnsureCaretVisible;
+VAR
+  CaretRow          : Integer;
 BEGIN
-  FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
-  IF FCaret.Line < FTopLine THEN
-    FTopLine := FCaret.Line
-  ELSE IF FCaret.Line >= FTopLine + VisibleLineCount THEN
-    FTopLine := FCaret.Line - VisibleLineCount + 1;
+  FTopRow := EnsureRange(FTopRow, 0, MaxTopRow);
+  CaretRow := PositionToRow(FCaret);
+  IF CaretRow < FTopRow THEN
+    FTopRow := CaretRow
+  ELSE IF CaretRow >= FTopRow + VisibleLineCount THEN
+    FTopRow := CaretRow - VisibleLineCount + 1;
 
-  IF FCaret.Column < FLeftColumn THEN
+  IF Wrapping THEN
+    FLeftColumn := 0
+  ELSE IF FCaret.Column < FLeftColumn THEN
     FLeftColumn := FCaret.Column
   ELSE IF FCaret.Column >= FLeftColumn + VisibleColumnCount THEN
     FLeftColumn := FCaret.Column - VisibleColumnCount + 1;
@@ -5061,7 +5450,7 @@ BEGIN
 
   OldCaret := FCaret;
   OldAnchor := FAnchor;
-  OldTopLine := FTopLine;
+  OldTopLine := FTopRow;
   OldLeftColumn := FLeftColumn;
   OldNeedle := OccurrenceNeedle;
   HadExtra := HasMultipleSelections;
@@ -5087,7 +5476,7 @@ BEGIN
   IF (FLeftColumn <> OldLeftColumn) OR HadExtra THEN
     Invalidate
   ELSE BEGIN
-    IF FTopLine <> OldTopLine THEN
+    IF FTopRow <> OldTopLine THEN
       ScrollViewport(OldTopLine);
     IF OccurrenceNeedle <> OldNeedle THEN
       InvalidateTextArea
@@ -5111,15 +5500,16 @@ END;
 
 PROCEDURE TCodeEditor.MoveCaretVertically(DeltaLines: Integer; Shift: TShiftState);
 VAR
-  Target            : TCodePosition;
+  Row               : Integer;
 BEGIN
-  // Remember the column the user is aiming for so that passing through short
-  // lines doesn't permanently snap the caret to their length.
+  // Moves by visual row (a wrapped line's rows one at a time). Remember the
+  // column the user is aiming for - as drawn, so it survives continuation
+  // indents - so that passing through short rows doesn't permanently snap
+  // the caret to their length.
   IF FDesiredColumn < 0 THEN
-    FDesiredColumn := FCaret.Column;
-  Target.Line := FCaret.Line + DeltaLines;
-  Target.Column := FDesiredColumn;
-  MoveCaret(Target, Shift, True);
+    FDesiredColumn := VisualColumn(FCaret);
+  Row := EnsureRange(PositionToRow(FCaret) + DeltaLines, 0, Max(0, RowCount - 1));
+  MoveCaret(RowPositionAt(Row, FDesiredColumn), Shift, True);
 END;
 
 FUNCTION TCodeEditor.PrevWordPosition(CONST Position: TCodePosition): TCodePosition;
@@ -5590,13 +5980,13 @@ BEGIN
         FScrollDragOffset := Y - Thumb.Top;
       END ELSE BEGIN
         IF Y < Thumb.Top THEN
-          NewPos := FTopLine - VisibleLineCount
+          NewPos := FTopRow - VisibleLineCount
         ELSE
-          NewPos := FTopLine + VisibleLineCount;
-        NewPos := EnsureRange(NewPos, 0, Max(0, FLines.Count - VisibleLineCount));
-        IF NewPos <> FTopLine THEN BEGIN
-          OldTop := FTopLine;
-          FTopLine := NewPos;
+          NewPos := FTopRow + VisibleLineCount;
+        NewPos := EnsureRange(NewPos, 0, MaxTopRow);
+        IF NewPos <> FTopRow THEN BEGIN
+          OldTop := FTopRow;
+          FTopRow := NewPos;
           UpdateScrollBars;
           ScrollViewport(OldTop);
         END;
@@ -5651,15 +6041,15 @@ BEGIN
     Thumb := StyledVerticalThumbRect;
     ThumbExtent := Thumb.Height;
     Travel := Max(1, Track.Height - ThumbExtent);
-    MaxTopLine := Max(0, FLines.Count - VisibleLineCount);
+    MaxTopLine := MaxTopRow;
     NewPos := EnsureRange(Y - FScrollDragOffset - Track.Top, 0, Travel);
     IF MaxTopLine > 0 THEN
       NewPos := MulDiv(NewPos, MaxTopLine, Travel)
     ELSE
       NewPos := 0;
-    IF NewPos <> FTopLine THEN BEGIN
-      OldTop := FTopLine;
-      FTopLine := NewPos;
+    IF NewPos <> FTopRow THEN BEGIN
+      OldTop := FTopRow;
+      FTopRow := NewPos;
       UpdateScrollBars;
       UpdateCaret;
       ScrollViewport(OldTop);
@@ -5784,10 +6174,14 @@ BEGIN
 END;
 
 FUNCTION TCodeEditor.LineAtPoint(CONST Point: TPoint): Integer;
+VAR
+  Row               : Integer;
 BEGIN
-  Result := FTopLine + (Point.Y DIV FLineHeight);
-  IF (Result < 0) OR (Result >= FLines.Count) THEN
-    Result := -1;
+  Row := FTopRow + (Point.Y DIV FLineHeight);
+  IF (Row < 0) OR (Row >= RowCount) THEN
+    Result := -1
+  ELSE
+    Result := RowToLine(Row);
 END;
 
 PROCEDURE TCodeEditor.BreakpointsChanged;
@@ -5893,12 +6287,12 @@ BEGIN
     Exit;
   FExecutionLine := Value;
   IF FExecutionLine >= 1 THEN BEGIN
-    Idx := FExecutionLine - 1;
-    IF Idx < FTopLine THEN
-      FTopLine := Idx
-    ELSE IF Idx >= FTopLine + VisibleLineCount THEN
-      FTopLine := Idx - VisibleLineCount + 1;
-    FTopLine := EnsureRange(FTopLine, 0, Max(0, FLines.Count - VisibleLineCount));
+    Idx := LineFirstRow(FExecutionLine - 1);
+    IF Idx < FTopRow THEN
+      FTopRow := Idx
+    ELSE IF Idx >= FTopRow + VisibleLineCount THEN
+      FTopRow := Idx - VisibleLineCount + 1;
+    FTopRow := EnsureRange(FTopRow, 0, MaxTopRow);
     UpdateScrollBars;
   END;
   Invalidate;
@@ -6023,6 +6417,7 @@ END;
 FUNCTION TCodeEditor.WordAtPoint(CONST P: TPoint; OUT WordPos: TCodePosition): STRING;
 VAR
   R                 : TRect;
+  Row               : Integer;
   LineIndex         : Integer;
   Col               : Integer;
   LineText          : STRING;
@@ -6035,12 +6430,15 @@ BEGIN
   IF (P.X < R.Left) OR (P.Y < R.Top) THEN
     Exit;                               // over the gutter or above the text
 
-  LineIndex := FTopLine + (P.Y - R.Top) DIV FLineHeight;
-  IF (LineIndex < 0) OR (LineIndex >= FLines.Count) THEN
+  Row := FTopRow + (P.Y - R.Top) DIV FLineHeight;
+  IF (Row < 0) OR (Row >= RowCount) THEN
     Exit;
+  LineIndex := RowToLine(Row);
   // Character directly under the mouse (no half-cell rounding — we want the
   // glyph pointed at, not the nearest caret gap). Col is a 1-based string index.
-  Col := FLeftColumn + (P.X - R.Left) DIV FCharWidth + 1;
+  Col := RowStartColumn(Row) + FLeftColumn + (P.X - R.Left) DIV FCharWidth - RowIndent(Row) + 1;
+  IF Col - 1 >= RowEndColumn(Row) THEN
+    Exit;                               // past the end of a wrapped row, not on the next row's text
   LineText := FLines[LineIndex];
   IF (Col < 1) OR (Col > Length(LineText)) OR NOT IsWordChar(LineText[Col]) THEN
     Exit;
@@ -6242,6 +6640,7 @@ END;
 PROCEDURE TCodeEditor.PaintGutter;
 VAR
   I                 : Integer;
+  Row               : Integer;
   LineIndex         : Integer;
   Y                 : Integer;
   Text              : STRING;
@@ -6266,9 +6665,14 @@ BEGIN
     Canvas.LineTo(FGutterWidth - 1, ClientHeight);
 
     FOR I := 0 TO PaintedLineCount - 1 DO BEGIN
-      LineIndex := FTopLine + I;
-      IF LineIndex >= FLines.Count THEN
+      Row := FTopRow + I;
+      IF Row >= RowCount THEN
         Break;
+      // A wrapped line's continuation rows get an empty gutter: the number
+      // and glyphs sit beside its first row only.
+      IF RowStartColumn(Row) > 0 THEN
+        Continue;
+      LineIndex := RowToLine(Row);
 
       Y := I * FLineHeight + 1;
       HasBp := HasBreakpoint(LineIndex + 1);
@@ -6305,6 +6709,7 @@ END;
 PROCEDURE TCodeEditor.PaintText;
 VAR
   I                 : Integer;
+  Row               : Integer;
   LineIndex         : Integer;
   Y                 : Integer;
   LineText          : STRING;
@@ -6339,10 +6744,18 @@ BEGIN
   SaveIdx := SaveDC(Canvas.Handle);
   TRY
     IntersectClipRect(Canvas.Handle, R.Left, R.Top, R.Right, R.Bottom);
+  FPaintTextLeft := R.Left;
   FOR I := 0 TO PaintedLineCount - 1 DO BEGIN
-    LineIndex := FTopLine + I;
-    IF LineIndex >= FLines.Count THEN
+    Row := FTopRow + I;
+    IF Row >= RowCount THEN
       Break;
+    // Tell the per-line painters which slice of the line this row shows;
+    // with word wrap off that is the whole line.
+    LineIndex := RowToLine(Row);
+    FPaintRowStart := RowStartColumn(Row);
+    FPaintRowEnd := RowEndColumn(Row);
+    FPaintRowIndent := RowIndent(Row);
+    FPaintRowLast := IsLastRowOfLine(Row);
 
     Y := I * FLineHeight + 1;
     LineText := FLines[LineIndex];
@@ -6370,8 +6783,8 @@ BEGIN
     PaintSearchMatchesLine(LineIndex, Y, LineText);
     PaintOccurrenceHighlightsLine(LineIndex, Y, LineText, OccurrenceNeedle);
     PaintSelectionLine(LineIndex, Y, LineText);
-    PaintLineTokens(LineIndex, R.Left, Y, DrawText, clNone);
-    PaintSelectedTextLine(LineIndex, R.Left, Y, DrawText);
+    PaintLineTokens(LineIndex, Y, DrawText, clNone);
+    PaintSelectedTextLine(LineIndex, Y, DrawText);
     IF HaveBracketMatch THEN
       PaintBracketMatchesLine(LineIndex, Y, BracketOpen, BracketClose);
     PaintMultipleCaretsLine(LineIndex, Y);
@@ -6941,19 +7354,23 @@ VAR
     IF (ALineIndex < AStart.Line) OR (ALineIndex > AEnd.Line) THEN
       Exit;
 
+    IF ComparePositions(AStart, AEnd) = 0 THEN
+      Exit;
     StartCol := 0;
     EndCol := Length(LineText);
     IF ALineIndex = AStart.Line THEN
       StartCol := AStart.Column;
     IF ALineIndex = AEnd.Line THEN
       EndCol := AEnd.Column;
-
-    R := ClientTextRect;
-    X1 := R.Left + (StartCol - FLeftColumn) * FCharWidth;
-    X2 := R.Left + (EndCol - FLeftColumn) * FCharWidth;
-    IF ComparePositions(AStart, AEnd) = 0 THEN
+    // Only the slice this row shows.
+    StartCol := Max(StartCol, FPaintRowStart);
+    EndCol := Min(EndCol, FPaintRowEnd);
+    IF EndCol <= StartCol THEN
       Exit;
 
+    R := ClientTextRect;
+    X1 := ColumnX(StartCol);
+    X2 := ColumnX(EndCol);
     Canvas.Brush.Color := ThemeColors.SelectionBackground;
     Canvas.FillRect(Rect(Max(R.Left, X1), Y - 1, Max(R.Left, X2), Y + FLineHeight - 1));
   END;
@@ -6980,11 +7397,11 @@ VAR
 
   PROCEDURE PaintCaretAt(CONST CaretPosition: TCodePosition);
   BEGIN
-    IF CaretPosition.Line <> ALineIndex THEN
+    IF (CaretPosition.Line <> ALineIndex) OR NOT ColumnInRow(CaretPosition.Column) THEN
       Exit;
 
     R := ClientTextRect;
-    X := R.Left + (CaretPosition.Column - FLeftColumn) * FCharWidth;
+    X := ColumnX(CaretPosition.Column);
     IF (X < R.Left) OR (X > R.Right) THEN
       Exit;
 
@@ -7016,10 +7433,12 @@ VAR
 
   PROCEDURE PaintMatch(CONST Position: TCodePosition);
   BEGIN
-    IF Position.Line <> ALineIndex THEN
+    // The bracket character itself must be on this row.
+    IF (Position.Line <> ALineIndex) OR (Position.Column < FPaintRowStart) OR
+      (Position.Column >= FPaintRowEnd) THEN
       Exit;
     R := ClientTextRect;
-    X := R.Left + (Position.Column - FLeftColumn) * FCharWidth;
+    X := ColumnX(Position.Column);
     Box := Rect(X, Y - 1, X + FCharWidth, Y + FLineHeight - 1);
     IF (Box.Right < R.Left) OR (Box.Left > R.Right) THEN
       Exit;
@@ -7042,6 +7461,8 @@ VAR
   R                 : TRect;
   X1                : Integer;
   X2                : Integer;
+  StartCol          : Integer;
+  EndCol            : Integer;
   FillColor         : TColor;
   Range             : TCodeSelectionRange;
 
@@ -7088,10 +7509,16 @@ BEGIN
     Range.Anchor := TCodePosition.Create(ALineIndex, FoundAt - 1);
     Range.Caret := TCodePosition.Create(ALineIndex, FoundAt - 1 + Length(Needle));
     IF NOT IsActiveSelection(RangeStart(Range), RangeEnd(Range)) THEN BEGIN
-      X1 := R.Left + (RangeStart(Range).Column - FLeftColumn) * FCharWidth;
-      X2 := R.Left + (RangeEnd(Range).Column - FLeftColumn) * FCharWidth;
-      Canvas.Brush.Color := FillColor;
-      Canvas.FillRect(Rect(Max(R.Left, X1), Y - 1, Max(R.Left, X2), Y + FLineHeight - 1));
+      // Clip to the slice this row shows; a match across a wrap break paints
+      // on both rows.
+      StartCol := Max(FoundAt - 1, FPaintRowStart);
+      EndCol := Min(FoundAt - 1 + Length(Needle), FPaintRowEnd);
+      IF EndCol > StartCol THEN BEGIN
+        X1 := ColumnX(StartCol);
+        X2 := ColumnX(EndCol);
+        Canvas.Brush.Color := FillColor;
+        Canvas.FillRect(Rect(Max(R.Left, X1), Y - 1, Max(R.Left, X2), Y + FLineHeight - 1));
+      END;
     END;
 
     SearchStart := FoundAt + Max(1, Length(Needle));
@@ -7105,6 +7532,8 @@ VAR
   R                 : TRect;
   X1                : Integer;
   X2                : Integer;
+  StartCol          : Integer;
+  EndCol            : Integer;
   FillColor         : TColor;
 BEGIN
   IF NOT SearchVisible OR NOT Assigned(FSearchMatches) THEN
@@ -7115,9 +7544,13 @@ BEGIN
     Match := FSearchMatches[I];
     IF Match.Line <> ALineIndex THEN
       Continue;
+    StartCol := Max(Match.Column, FPaintRowStart);
+    EndCol := Min(Match.Column + Match.Length, FPaintRowEnd);
+    IF EndCol <= StartCol THEN
+      Continue;                         // not on this row of the line
 
-    X1 := R.Left + (Match.Column - FLeftColumn) * FCharWidth;
-    X2 := R.Left + (Match.Column + Match.Length - FLeftColumn) * FCharWidth;
+    X1 := ColumnX(StartCol);
+    X2 := ColumnX(EndCol);
     IF I = FSearchIndex THEN
       FillColor := $00606000
     ELSE
@@ -7128,7 +7561,9 @@ BEGIN
   END;
 END;
 
-PROCEDURE TCodeEditor.PaintLineTokens(ALineIndex, X, Y: Integer; CONST LineText: STRING;
+// Draws the slice of the line that the current row shows (FPaintRowStart ..
+// FPaintRowEnd); tokens straddling a wrap break are split across the rows.
+PROCEDURE TCodeEditor.PaintLineTokens(ALineIndex, Y: Integer; CONST LineText: STRING;
   ForcedColor: TColor);
 VAR
   Tokens            : TCodeTokenArray;
@@ -7136,6 +7571,8 @@ VAR
   Style             : TCodeTextStyle;
   Text              : STRING;
   TokenX            : Integer;
+  StartCol          : Integer;
+  EndCol            : Integer;
 BEGIN
   IF NOT Assigned(FHighlighter) THEN BEGIN
     IF ForcedColor <> clNone THEN
@@ -7143,15 +7580,20 @@ BEGIN
     ELSE
       Canvas.Font.Color := FPaintTheme.Text;
     Canvas.Brush.Style := bsClear;
-    Canvas.TextOut(X - FLeftColumn * FCharWidth, Y, LineText);
+    Canvas.TextOut(ColumnX(FPaintRowStart), Y,
+      Copy(LineText, FPaintRowStart + 1, FPaintRowEnd - FPaintRowStart));
     Canvas.Brush.Style := bsSolid;
     Exit;
   END;
 
   Tokens := LineTokens(ALineIndex);
   FOR Token IN Tokens DO BEGIN
-    Text := Copy(LineText, Token.Start, Token.Length);
-    TokenX := X + (Token.Start - 1 - FLeftColumn) * FCharWidth;
+    StartCol := Max(Token.Start - 1, FPaintRowStart);
+    EndCol := Min(Token.Start - 1 + Token.Length, FPaintRowEnd);
+    IF EndCol <= StartCol THEN
+      Continue;
+    Text := Copy(LineText, StartCol + 1, EndCol - StartCol);
+    TokenX := ColumnX(StartCol);
     Style := FHighlighter.Styles[Token.Kind];
     IF FOptions.ThemeSyntaxColors THEN
       Style := TokenStyleForTheme(Token.Kind, Style, FPaintTheme);
@@ -7199,7 +7641,7 @@ BEGIN
   ACanvas.Font.Style := Font.Style;
 END;
 
-PROCEDURE TCodeEditor.PaintSelectedTextLine(ALineIndex, X, Y: Integer; CONST LineText: STRING);
+PROCEDURE TCodeEditor.PaintSelectedTextLine(ALineIndex, Y: Integer; CONST LineText: STRING);
 VAR
   R                 : TRect;
   Range             : TCodeSelectionRange;
@@ -7225,18 +7667,20 @@ VAR
       StartCol := AStart.Column;
     IF ALineIndex = AEnd.Line THEN
       EndCol := Min(EndCol, AEnd.Column);
+    StartCol := Max(StartCol, FPaintRowStart);
+    EndCol := Min(EndCol, FPaintRowEnd);
     IF EndCol <= StartCol THEN
       Exit;
 
-    X1 := Max(R.Left, R.Left + (StartCol - FLeftColumn) * FCharWidth);
-    X2 := Max(R.Left, R.Left + (EndCol - FLeftColumn) * FCharWidth);
+    X1 := Max(R.Left, ColumnX(StartCol));
+    X2 := Max(R.Left, ColumnX(EndCol));
     IF X2 <= X1 THEN
       Exit;
 
     SaveIndex := SaveDC(Canvas.Handle);
     TRY
       IntersectClipRect(Canvas.Handle, X1, Y - 1, X2, Y + FLineHeight - 1);
-      PaintLineTokens(ALineIndex, X, Y, LineText, FPaintTheme.SelectionText);
+      PaintLineTokens(ALineIndex, Y, LineText, FPaintTheme.SelectionText);
     FINALLY
       RestoreDC(Canvas.Handle, SaveIndex);
     END;

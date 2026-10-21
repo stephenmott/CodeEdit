@@ -64,6 +64,8 @@ fixed-pitch font — caret math is one column per character cell.
 | `MinimapStyle` | `cmsText` | `cmsText` draws real shrunken text (bold glyphs rendered at 3x and averaged down, then contrast-boosted) so word shapes, lengths and token colours survive, like the Delphi 13 and VS Code maps; it is cached and re-rendered only when the text, theme, size or scroll position changes. `cmsBlocks` is the original solid-bar-per-token rendering. |
 | `TabSize` | `2` | Number of spaces the Tab key inserts, and the indent unit for `IndentSelection` / `UnindentSelection`. |
 | `ThemeSyntaxColors` | `True` | Re-map token colors to theme-appropriate palettes (separate dark/light sets) instead of using the highlighter's raw `Styles[]`. |
+| `WordWrap` | `False` | Wrap long lines at the text area's right edge, breaking after the last blank that fits (a run with no blank is cut at the width). No horizontal scrolling while on. Up/Down and PageUp/PageDown move by visual row; Home/End still go to the start/end of the whole line; the gutter numbers only a line's first row; a column on a wrap break belongs to the row that starts there. |
+| `WrapIndent` | `True` | Start a wrapped line's continuation rows under its first non-blank character (what you want for code). Off, they start at the left margin (log windows). Deeply indented lines fall back to the margin so at least 8 cells remain. |
 
 Tab characters already present in loaded text are *rendered* one cell wide so
 caret arithmetic stays aligned; the Tab key itself always inserts spaces.
@@ -74,7 +76,7 @@ caret arithmetic stays aligned; the Tab key itself always inserts spaces.
 |---|---|
 | `Caret: TCodePosition` | Get/set the caret (0-based). Setting clears extra carets and scrolls into view; a target off screen lands about a quarter of the way down the view (at least two rows), so the code above it stays visible. Don't force `TopLine` afterwards. |
 | `SelectedText: string` | Get the selection / replace it (undo-grouped). |
-| `TopLine`, `LeftColumn: Integer` | Scroll position (0-based, clamped). |
+| `TopLine`, `LeftColumn: Integer` | Scroll position (0-based, clamped). With `WordWrap` on, `TopLine` reads as the line of the first visible row and writing it scrolls that line's first row to the top; `LeftColumn` is always 0. |
 | `ExecutionLine: Integer` | 1-based current-statement line; `-1` (or any value < 1) clears it. |
 | `CanUndoAction`, `CanRedoAction: Boolean` | For enabling host UI actions. |
 
@@ -232,4 +234,6 @@ automatically.
   document per step. Fine for scripts and source files, not for log viewers —
   lower `MaxUndo` and consider `Options.MaxPasteBytes` for hostile input.
 - The editor assumes a monospaced font.
-- Word wrap is not implemented.
+- Word wrap rebuilds its row map for the whole document after each edit
+  (one pass over the text, like the undo snapshot), so it is fine for
+  scripts and logs of a few megabytes but not for gigantic files.
