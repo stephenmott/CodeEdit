@@ -6,6 +6,15 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- `TCodeEditorSettings` (new `CodeEdit.Settings` unit, on the palette): user
+  preferences for one editor persisted under `HKEY_CURRENT_USER\<RegistryPath>`
+  (`LoadSettings` / `SaveSettings` / `SettingsExist` / `DeleteSettings`), an
+  options dialog (`Execute`; `CodeEdit.SettingsDlg`) with Editing, Display,
+  Font and Colours pages, a live preview, Apply, and Import/Export through an
+  INI-format file (`ImportFromFile` / `ExportToFile` do the same in code).
+  `VisibleItems` trims the dialog to the settings that suit the editor, e.g.
+  a log viewer. Stored: everything in `Options`, font, zoom, scrollbar style,
+  theme mode and the theme colours. See `docs/settings.md`.
 - Minimap draws real text: each line is rendered with a bold font at three
   times the map size, shrunk with a halftone average and contrast-boosted,
   so word shapes, line lengths and token colours survive at 3 px per line

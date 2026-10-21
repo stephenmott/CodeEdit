@@ -119,6 +119,10 @@
         <DCCReference Include="..\Source\CodeEdit.Editor.pas"/>
         <DCCReference Include="..\Source\CodeEdit.Highlighter.pas"/>
         <DCCReference Include="..\Source\CodeEdit.Print.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.Settings.pas"/>
+        <DCCReference Include="..\Source\CodeEdit.SettingsDlg.pas">
+            <Form>CodeEditorSettingsDialog</Form>
+        </DCCReference>
         <DCCReference Include="..\Source\CodeEdit.Templates.pas"/>
         <DCCReference Include="..\Source\CodeEdit.TemplateEditorDlg.pas"/>
         <DCCReference Include="..\Source\CodeEdit.Register.pas"/>

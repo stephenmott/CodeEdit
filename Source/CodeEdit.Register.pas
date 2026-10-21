@@ -16,6 +16,7 @@ USES
   CodeEdit.Editor,
   CodeEdit.Highlighter,
   CodeEdit.Print,
+  CodeEdit.Settings,
   CodeEdit.TemplateEditorDlg,
   CodeEdit.Templates;
 
@@ -53,6 +54,7 @@ BEGIN
       TKeywordCompletionProvider,
       TCodeTemplateProvider,
       TCodeEditorPrinter,
+      TCodeEditorSettings,
       TDelphiCodeHighlighter,
       TJavaScriptCodeHighlighter,
       TSqlCodeHighlighter,

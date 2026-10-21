@@ -30,6 +30,8 @@ attribution is appreciated.
   preview), styled scrollbars, bracket matching, occurrence highlighting
 - Printing: `TCodeEditorPrinter` with syntax colours, line numbers,
   header/footer macros, word wrap, print dialog and a built-in preview
+- User settings: `TCodeEditorSettings` keeps an editor's preferences under
+  HKCU and shows an options dialog with live preview and import/export
 
 ## Documentation
 
@@ -45,6 +47,8 @@ attribution is appreciated.
   debugger-host surface
 - [Printing](docs/printing.md) — `TCodeEditorPrinter`, options, macros,
   preview, drawing pages on your own canvas
+- [Settings](docs/settings.md) — `TCodeEditorSettings`, the HKCU
+  persistence, the options dialog and import/export
 
 ## Units
 
@@ -59,6 +63,8 @@ attribution is appreciated.
 - `Source\CodeEdit.TemplateEditorDlg.pas` — runtime/design-time template
   editor dialog
 - `Source\CodeEdit.Print.pas` — `TCodeEditorPrinter` and the print preview
+- `Source\CodeEdit.Settings.pas` — `TCodeEditorSettings` (HKCU persistence,
+  import/export) and `Source\CodeEdit.SettingsDlg.pas` — its options dialog
   form
 - `Source\CodeEdit.DevExpressTheme.pas` — optional DevExpress skin bridge
   (add to apps directly; not part of the package)
