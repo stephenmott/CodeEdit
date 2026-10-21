@@ -2398,6 +2398,11 @@ object Form1: TForm1
       Category = 'Edit'
       Caption = 'Reset Sizes'
     end
+    object actEditorOptions: TAction
+      Category = 'Edit'
+      Caption = 'Editor Options...'
+      Hint = 'Editor Options|Font, colours, word wrap and other editor preferences'
+    end
   end
   object dxBarManager1: TdxBarManager
     Font.Charset = DEFAULT_CHARSET
@@ -2626,6 +2631,11 @@ object Form1: TForm1
         item
           Visible = True
           ItemName = 'dxBarLargeButton4'
+        end
+        item
+          BeginGroup = True
+          Visible = True
+          ItemName = 'dxEditorOptions'
         end>
     end
     object dxRun: TdxBarSubItem
@@ -2872,6 +2882,10 @@ object Form1: TForm1
     end
     object dxUncomment: TdxBarButton
       Action = actUnComment
+      Category = 2
+    end
+    object dxEditorOptions: TdxBarButton
+      Action = actEditorOptions
       Category = 2
     end
     object dxMatchDelimiter: TdxBarButton
@@ -3418,5 +3432,19 @@ object Form1: TForm1
   object PythonCodeHighlighter1: TPythonCodeHighlighter
     Left = 882
     Top = 634
+  end
+  object EditorSettings: TCodeEditorSettings
+    Editor = CodeEditor1
+    Title = 'Script Editor Options'
+    OnApplied = EditorSettingsApplied
+    Left = 882
+    Top = 746
+  end
+  object OutputSettings: TCodeEditorSettings
+    Editor = CodeEditor3
+    VisibleItems = [siWordWrap, siWrapIndent, siZoom, siFont, siThemeMode, siColours]
+    Title = 'Output Pane Options'
+    Left = 1042
+    Top = 746
   end
 end

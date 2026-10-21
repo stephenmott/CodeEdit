@@ -28,7 +28,7 @@ USES
   dxBarExtItems, dxBarBuiltInMenu, dxScrollbarAnnotations,
 
   {CodeEdit}
-  CodeEdit.Highlighter, CodeEdit.Completion, CodeEdit.Editor, CodeEdit.Print,
+  CodeEdit.Highlighter, CodeEdit.Completion, CodeEdit.Editor, CodeEdit.Print, CodeEdit.Settings,
 
   {JVCL}
   JvComponentBase, JvFormPlacement, JvAppStorage, JvAppRegistryStorage,
@@ -175,6 +175,7 @@ TYPE
     actFontDown: TAction;
     actFontUp: TAction;
     actResetSizes: TAction;
+    actEditorOptions: TAction;
     dxBarManager1: TdxBarManager;
     dxBarManager1Bar1: TdxBar;
     dxBarManager1Bar2: TdxBar;
@@ -215,6 +216,7 @@ TYPE
     dxBarButton1: TdxBarButton;
     dxViewProduction: TdxBarButton;
     dxViewOutput: TdxBarButton;
+    dxEditorOptions: TdxBarButton;
     JvAppRegistryStorage1: TJvAppRegistryStorage;
     JvFormStorage1: TJvFormStorage;
     cxStyleRepository1: TcxStyleRepository;
@@ -234,6 +236,10 @@ TYPE
     PythonCodeHighlighter1: TPythonCodeHighlighter;
     CodeEditor2: TCodeEditor;
     CodeEditor3: TCodeEditor;
+    // Script editors (production + test) share one set of preferences;
+    // the output pane has its own, trimmed to what a log viewer needs.
+    EditorSettings: TCodeEditorSettings;
+    OutputSettings: TCodeEditorSettings;
     PROCEDURE FormCreate(Sender: TObject);
     PROCEDURE FormDestroy(Sender: TObject);
     PROCEDURE FormShow(Sender: TObject);
@@ -249,6 +255,7 @@ TYPE
     PROCEDURE CompletionGetSignatureHelp(Sender: TObject; CONST Context: TCodeSignatureHelpContext;
       Items: TCodeSignatureItems);
     PROCEDURE EditorCommandClick(Sender: TObject);
+    PROCEDURE EditorSettingsApplied(Sender: TObject);
   PROTECTED
     PROCEDURE CreateParams(VAR Params: TCreateParams); OVERRIDE;
     PROCEDURE WMSysCommand(VAR Message: TWMSysCommand); MESSAGE WM_SYSCOMMAND;
@@ -637,6 +644,7 @@ BEGIN
   actFontDown.OnExecute := actExecute;
   actFontUp.OnExecute := actExecute;
   actResetSizes.OnExecute := actExecute;
+  actEditorOptions.OnExecute := actExecute;
   dxCut.OnClick := EditorCommandClick;
   dxCopy.OnClick := EditorCommandClick;
   dxPaste.OnClick := EditorCommandClick;
@@ -648,6 +656,25 @@ BEGIN
   fPrinter.Editor := fCurrentMemo;
   dxPrint.OnClick := EditorCommandClick;
   dxPrintPreview.OnClick := EditorCommandClick;
+
+  // User preferences (Edit > Editor Options...). Kept under the same HKCU
+  // root as the form placement; one key for the script editors, one for the
+  // output pane. Saved values override the InitEditor defaults above; on a
+  // first run the keys are absent and LoadSettings changes nothing. The
+  // test editor mirrors the script editor's settings (EditorSettingsApplied).
+  EditorSettings.RegistryPath := JvAppRegistryStorage1.Root + '\Editor';
+  OutputSettings.RegistryPath := JvAppRegistryStorage1.Root + '\Output';
+  EditorSettings.LoadSettings;
+  OutputSettings.LoadSettings;
+  EditorSettingsApplied(EditorSettings);
+END;
+
+PROCEDURE TForm1.EditorSettingsApplied(Sender: TObject);
+BEGIN
+  // The test editor shows the same kind of text as the production editor,
+  // so it follows the production editor's preferences.
+  IF Sender = EditorSettings THEN
+    EditorSettings.CurrentValues.ApplyTo(CodeEditor2);
 END;
 
 PROCEDURE TForm1.EditorCommandClick(Sender: TObject);
@@ -792,6 +819,17 @@ BEGIN
 
   IF Sender = actTemplatePopup THEN
     fCurrentMemo.TriggerCompletion;
+
+  IF Sender = actEditorOptions THEN BEGIN
+    // The dialog for whichever pane has focus: the output pane has its own
+    // (smaller) set of settings, the two script editors share one.
+    IF fCurrentMemo = CodeEditor3 THEN
+      OutputSettings.Execute
+    ELSE
+      EditorSettings.Execute;
+    IF Assigned(fCurrentMemo) AND fCurrentMemo.CanFocus THEN
+      fCurrentMemo.SetFocus;
+  END;
 
   IF Sender = actClose THEN BEGIN
     fResult := mrOK;

@@ -17,7 +17,11 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   theme mode and the theme colours. See `docs/settings.md`. Palette icons
   added for it and for `TCodeEditorPrinter` (`Packages\Icons\MakeIcons.ps1`).
   The `CodeEditDemo2` sample has an "Editor Options..." button wired to one,
-  loading the saved preferences at startup.
+  loading the saved preferences at startup. The ScrEdit sample shows the
+  per-editor pattern: one component shared by the production and test
+  script editors (the test editor mirrors it through `OnApplied`) and a
+  second, trimmed to wrap, font, zoom and colours, for the output pane;
+  Edit > Editor Options... opens whichever the focused pane uses.
 - Minimap draws real text: each line is rendered with a bold font at three
   times the map size, shrunk with a halftone average and contrast-boosted,
   so word shapes, line lengths and token colours survive at 3 px per line
