@@ -58,5 +58,25 @@ Four pages, Editing, Display, Font and Colours, a live preview below them
 (the editor's own text and highlighter, or a stock sample when it is empty),
 and Import, Export, OK, Cancel and Apply. OK and Apply push the values to
 the editor and save them; Cancel discards changes not yet applied. The
-colour boxes are enabled only when the colour mode is *Custom*; *Follow the
-VCL style* takes the palette from the active style instead.
+minimap and word-wrap sub-options are enabled only while their parent
+option is on. The colour boxes are enabled only when the colour mode is
+*Custom*; *Follow the VCL style* takes the palette from the active style
+instead.
+
+## Theme sources (DevExpress skins and the like)
+
+The core package cannot depend on DevExpress, so other palettes plug in:
+
+```pascal
+RegisterCodeEditorThemeSource('DevExpress', 'Follow the DevExpress skin',
+  ApplyDevExpressThemeToEditor);
+```
+
+`CodeEdit.DevExpressTheme` does exactly this in its initialization section,
+so any application that links that unit gets *Follow the DevExpress skin*
+as a third entry in the colour mode box. The chosen source's name is stored
+with the other values (`ThemeSource`) and re-applied by `LoadSettings`; the
+component's `ThemeSource` property holds the choice in force and can be
+preset at design time. A saved name that is no longer registered is kept
+but ignored. A source applies once per apply; pair it with
+`TCodeEditorDevExpressTheme` to follow skin changes made afterwards.

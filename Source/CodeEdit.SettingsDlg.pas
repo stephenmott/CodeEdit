@@ -99,8 +99,10 @@ TYPE
     PROCEDURE ValuesToControls(CONST V: TCodeEditorSettingsValues);
     FUNCTION ControlsToValues: TCodeEditorSettingsValues;
     PROCEDURE ApplyVisibility;
+    PROCEDURE PopulateThemeModes;
     PROCEDURE UpdateFontLabel;
     PROCEDURE UpdateColourStates;
+    PROCEDURE UpdateDependentStates;
     PROCEDURE UpdatePreview;
     PROCEDURE ApplyToEditor;
   PUBLIC
@@ -179,7 +181,35 @@ BEGIN
   END;
 
   ApplyVisibility;
+  PopulateThemeModes;
   ValuesToControls(FSettings.CurrentValues);
+END;
+
+// "Custom" and "Follow the VCL style" from the DFM, then whatever theme
+// sources the host registered (the DevExpress skin bridge, for one).
+PROCEDURE TCodeEditorSettingsDialog.PopulateThemeModes;
+VAR
+  I                 : Integer;
+BEGIN
+  WHILE ComboThemeMode.Items.Count > 2 DO
+    ComboThemeMode.Items.Delete(ComboThemeMode.Items.Count - 1);
+  FOR I := 0 TO CodeEditorThemeSourceCount - 1 DO
+    ComboThemeMode.Items.Add(CodeEditorThemeSources(I).Caption);
+END;
+
+// Sub-options only mean something while their parent is on.
+PROCEDURE TCodeEditorSettingsDialog.UpdateDependentStates;
+VAR
+  Minimap           : Boolean;
+BEGIN
+  Minimap := CheckShowMinimap.Checked;
+  CheckMinimapPreview.Enabled := Minimap;
+  LabelMinimapStyle.Enabled := Minimap;
+  ComboMinimapStyle.Enabled := Minimap;
+  LabelMinimapRowHeight.Enabled := Minimap;
+  EditMinimapRowHeight.Enabled := Minimap;
+  UpDownMinimapRowHeight.Enabled := Minimap;
+  CheckWrapIndent.Enabled := CheckWordWrap.Checked;
 END;
 
 PROCEDURE TCodeEditorSettingsDialog.ApplyVisibility;
@@ -252,6 +282,8 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditorSettingsDialog.ValuesToControls(CONST V: TCodeEditorSettingsValues);
+VAR
+  I                 : Integer;
 
   // A TUpDown only pushes its position into the buddy edit once it has a
   // window handle, and Prepare runs before the dialog is shown - so set
@@ -289,6 +321,10 @@ BEGIN
     UpdateFontLabel;
 
     ComboThemeMode.ItemIndex := Ord(V.ThemeMode);
+    IF V.ThemeSource <> '' THEN
+      FOR I := 0 TO CodeEditorThemeSourceCount - 1 DO
+        IF SameText(CodeEditorThemeSources(I).Name, V.ThemeSource) THEN
+          ComboThemeMode.ItemIndex := 2 + I;
     ColorBackground.Selected := V.Background;
     ColorText.Selected := V.Text;
     ColorGutterBackground.Selected := V.GutterBackground;
@@ -297,6 +333,7 @@ BEGIN
     ColorSelectionBackground.Selected := V.SelectionBackground;
     ColorSelectionText.Selected := V.SelectionText;
     UpdateColourStates;
+    UpdateDependentStates;
   FINALLY
     FLoading := False;
   END;
@@ -360,7 +397,15 @@ BEGIN
   END;
 
   IF (siThemeMode IN Items) AND (ComboThemeMode.ItemIndex >= 0) THEN
-    Result.ThemeMode := TCodeEditorThemeMode(ComboThemeMode.ItemIndex);
+    IF ComboThemeMode.ItemIndex >= 2 THEN BEGIN
+      // A registered theme source: it colours the editor itself (manual
+      // mode, see TCodeEditorSettingsValues.ApplyTo).
+      Result.ThemeSource := CodeEditorThemeSources(ComboThemeMode.ItemIndex - 2).Name;
+      Result.ThemeMode := ctmManual;
+    END ELSE BEGIN
+      Result.ThemeSource := '';
+      Result.ThemeMode := TCodeEditorThemeMode(ComboThemeMode.ItemIndex);
+    END;
   IF siColours IN Items THEN BEGIN
     Result.Background := ColorBackground.Selected;
     Result.Text := ColorText.Selected;
@@ -388,7 +433,8 @@ PROCEDURE TCodeEditorSettingsDialog.UpdateColourStates;
 VAR
   Manual            : Boolean;
 BEGIN
-  // Colours only apply in manual theme mode; following the VCL style ignores them.
+  // The colour boxes only apply to "Custom"; the VCL style and any
+  // registered theme source bring their own palette.
   Manual := ComboThemeMode.ItemIndex = Ord(ctmManual);
   ColorBackground.Enabled := Manual;
   ColorText.Enabled := Manual;
@@ -408,6 +454,8 @@ END;
 
 PROCEDURE TCodeEditorSettingsDialog.ControlChanged(Sender: TObject);
 BEGIN
+  IF (Sender = CheckShowMinimap) OR (Sender = CheckWordWrap) THEN
+    UpdateDependentStates;
   UpdatePreview;
 END;
 

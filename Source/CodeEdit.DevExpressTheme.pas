@@ -54,7 +54,8 @@ implementation
 uses
   System.UITypes,
   Vcl.Graphics,
-  cxLookAndFeelPainters;
+  cxLookAndFeelPainters,
+  CodeEdit.Settings;
 
 procedure ApplyDevExpressThemeToEditor(Editor: TCodeEditor);
 var
@@ -151,5 +152,14 @@ begin
   for Editor in FEditors do
     ApplyDevExpressThemeToEditor(Editor);
 end;
+
+initialization
+  // Lets the TCodeEditorSettings options dialog offer "Follow the DevExpress
+  // skin" beside "Custom" and "Follow the VCL style" in any application that
+  // links this unit; the choice is saved and re-applied with the other
+  // settings. Pair it with a TCodeEditorDevExpressTheme to track skin
+  // changes made after the settings were applied.
+  RegisterCodeEditorThemeSource('DevExpress', 'Follow the DevExpress skin',
+    ApplyDevExpressThemeToEditor);
 
 end.

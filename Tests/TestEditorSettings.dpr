@@ -46,6 +46,15 @@ begin
   Inc(TestEditorSettings.Applied);
 end;
 
+// Stands in for the DevExpress skin bridge: a registered theme source that
+// colours the editor from "somewhere else".
+procedure ApplyTestPalette(Editor: TCodeEditor);
+begin
+  Editor.Theme.Background := $00BBBBBB;
+  Editor.Theme.Text := $00222222;
+  Editor.ThemeMode := ctmManual;
+end;
+
 procedure Customise(E: TCodeEditor);
 begin
   E.Options.TabSize := 7;
@@ -225,9 +234,56 @@ begin
       Dlg.ComboThemeModeChange(nil);
       Check(not Dlg.ColorBackground.Enabled, 'colour boxes disabled when following the VCL style');
       Check(Dlg.LabelFont.Caption = 'Lucida Console, 12pt, bold', 'font label: ' + Dlg.LabelFont.Caption);
+      // Sub-options follow their parent checkbox.
+      Check(Dlg.CheckShowMinimap.Checked and Dlg.ComboMinimapStyle.Enabled and Dlg.CheckMinimapPreview.Enabled,
+        'minimap sub-options enabled while the minimap is on');
+      Dlg.CheckShowMinimap.Checked := False;
+      Check(not Dlg.ComboMinimapStyle.Enabled and not Dlg.CheckMinimapPreview.Enabled and
+        not Dlg.EditMinimapRowHeight.Enabled, 'minimap sub-options disabled when it is off');
+      Check(Dlg.CheckWordWrap.Checked and Dlg.CheckWrapIndent.Enabled, 'wrap indent enabled while wrapping');
+      Dlg.CheckWordWrap.Checked := False;
+      Check(not Dlg.CheckWrapIndent.Enabled, 'wrap indent disabled when wrap is off');
       Dlg.EditTabSize.Text := '4';
       Dlg.ButtonOKClick(nil);
       Check((Ed3.Options.TabSize = 4) and (Ed3.ThemeMode = ctmVclStyle), 'OK with no path still applies');
+    finally
+      Dlg.Free;
+    end;
+
+    // 7b. A registered theme source appears as a third colour choice, colours
+    //     the editor when chosen, and round-trips through the registry.
+    RegisterCodeEditorThemeSource('Test', 'Follow the test palette', ApplyTestPalette);
+    Settings.Editor := Ed;
+    Settings.RegistryPath := TestKey;
+    Dlg := TCodeEditorSettingsDialog.Create(nil);
+    try
+      Dlg.Prepare(Settings);
+      Check(Dlg.ComboThemeMode.Items.Count = 3, 'theme source listed: ' + IntToStr(Dlg.ComboThemeMode.Items.Count));
+      Check(Dlg.ComboThemeMode.Items[2] = 'Follow the test palette', 'theme source caption');
+      Dlg.ComboThemeMode.ItemIndex := 2;
+      Dlg.ComboThemeModeChange(nil);
+      Check(not Dlg.ColorBackground.Enabled, 'colour boxes disabled for a theme source');
+      Check(Dlg.PreviewEditor.Theme.Background = $00BBBBBB, 'preview coloured by the source');
+      Dlg.ButtonOKClick(nil);
+      Check((Ed.Theme.Background = $00BBBBBB) and (Ed.ThemeMode = ctmManual), 'OK applied the source to the editor');
+      Check(Settings.ThemeSource = 'Test', 'component remembers the source: ' + Settings.ThemeSource);
+    finally
+      Dlg.Free;
+    end;
+    Settings.Editor := Ed2;
+    Settings.ThemeSource := '';
+    Ed2.Theme.Background := clWhite;
+    Settings.LoadSettings;
+    Check((Settings.ThemeSource = 'Test') and (Ed2.Theme.Background = $00BBBBBB),
+      'source re-applied by LoadSettings');
+    Dlg := TCodeEditorSettingsDialog.Create(nil);
+    try
+      Dlg.Prepare(Settings);
+      Check(Dlg.ComboThemeMode.ItemIndex = 2, 'dialog shows the saved source selected');
+      Dlg.ComboThemeMode.ItemIndex := 0;
+      Dlg.ComboThemeModeChange(nil);
+      Dlg.ButtonOKClick(nil);
+      Check(Settings.ThemeSource = '', 'choosing Custom clears the source');
     finally
       Dlg.Free;
     end;

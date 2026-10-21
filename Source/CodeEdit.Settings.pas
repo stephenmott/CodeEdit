@@ -28,6 +28,19 @@ USES
 TYPE
   ECodeEditorSettings = CLASS(Exception);
 
+  // A named way of colouring the editor that a host can plug in without the
+  // package depending on it (CodeEdit.DevExpressTheme registers "Follow the
+  // DevExpress skin"). The dialog lists registered sources after "Custom"
+  // and "Follow the VCL style"; the chosen Name is stored with the other
+  // values and re-applied by LoadSettings. Apply sets the editor's Theme and
+  // ThemeMode from wherever the source gets its palette.
+  TCodeEditorThemeSourceProc = PROCEDURE(Editor: TCodeEditor);
+  TCodeEditorThemeSource = RECORD
+    Name: STRING;                       // stored; stable across versions
+    Caption: STRING;                    // shown in the dialog
+    Apply: TCodeEditorThemeSourceProc;
+  END;
+
   // The settings the dialog can show. VisibleItems hides whole pages when
   // none of their items are included.
   TCodeEditorSettingItem = (
@@ -60,6 +73,10 @@ TYPE
     FontSize: Integer;
     FontStyle: TFontStyles;
     ThemeMode: TCodeEditorThemeMode;
+    // Name of a registered theme source, or '' when ThemeMode and the
+    // colours below govern. An editor cannot tell which source coloured it,
+    // so ReadFrom leaves this '' and TCodeEditorSettings fills it in.
+    ThemeSource: STRING;
     Background: TColor;
     Text: TColor;
     GutterBackground: TColor;
@@ -77,6 +94,7 @@ TYPE
     FRegistryPath: STRING;
     FVisibleItems: TCodeEditorSettingItems;
     FTitle: STRING;
+    FThemeSource: STRING;
     FOnApplied: TNotifyEvent;
     PROCEDURE SetEditor(Value: TCodeEditor);
     PROCEDURE RequireEditor(CONST Caller: STRING);
@@ -114,6 +132,10 @@ TYPE
       DEFAULT [Low(TCodeEditorSettingItem)..High(TCodeEditorSettingItem)];
     // Dialog caption.
     PROPERTY Title: STRING READ FTitle WRITE FTitle;
+    // Registered theme source in force ('' = ThemeMode / colours). Set it at
+    // design time to make e.g. 'DevExpress' the initial choice; it is
+    // updated by every apply and stored with the other values.
+    PROPERTY ThemeSource: STRING READ FThemeSource WRITE FThemeSource;
     // After ApplyValues (dialog OK/Apply, LoadSettings, ImportFromFile).
     PROPERTY OnApplied: TNotifyEvent READ FOnApplied WRITE FOnApplied;
   END;
@@ -122,13 +144,71 @@ CONST
   AllCodeEditorSettingItems = [Low(TCodeEditorSettingItem)..High(TCodeEditorSettingItem)];
   CodeEditorSettingsIniSection = 'CodeEditor';
 
+PROCEDURE RegisterCodeEditorThemeSource(CONST Name, Caption: STRING;
+  Apply: TCodeEditorThemeSourceProc);
+FUNCTION CodeEditorThemeSourceCount: Integer;
+FUNCTION CodeEditorThemeSources(Index: Integer): TCodeEditorThemeSource;
+FUNCTION FindCodeEditorThemeSource(CONST Name: STRING; OUT Source: TCodeEditorThemeSource): Boolean;
+
 IMPLEMENTATION
 
 USES
+  System.Generics.Collections,
   System.IniFiles,
   System.Win.Registry,
   Winapi.Windows,
   CodeEdit.SettingsDlg;
+
+{ Theme source registry }
+
+VAR
+  ThemeSourceList   : TList<TCodeEditorThemeSource>;
+
+PROCEDURE RegisterCodeEditorThemeSource(CONST Name, Caption: STRING;
+  Apply: TCodeEditorThemeSourceProc);
+VAR
+  Source            : TCodeEditorThemeSource;
+  I                 : Integer;
+BEGIN
+  IF (Trim(Name) = '') OR NOT Assigned(Apply) THEN
+    Exit;
+  IF ThemeSourceList = NIL THEN
+    ThemeSourceList := TList<TCodeEditorThemeSource>.Create;
+  Source.Name := Name;
+  Source.Caption := Caption;
+  Source.Apply := Apply;
+  FOR I := 0 TO ThemeSourceList.Count - 1 DO
+    IF SameText(ThemeSourceList[I].Name, Name) THEN BEGIN
+      ThemeSourceList[I] := Source;     // re-registration replaces
+      Exit;
+    END;
+  ThemeSourceList.Add(Source);
+END;
+
+FUNCTION CodeEditorThemeSourceCount: Integer;
+BEGIN
+  IF ThemeSourceList = NIL THEN
+    Result := 0
+  ELSE
+    Result := ThemeSourceList.Count;
+END;
+
+FUNCTION CodeEditorThemeSources(Index: Integer): TCodeEditorThemeSource;
+BEGIN
+  Result := ThemeSourceList[Index];
+END;
+
+FUNCTION FindCodeEditorThemeSource(CONST Name: STRING; OUT Source: TCodeEditorThemeSource): Boolean;
+VAR
+  I                 : Integer;
+BEGIN
+  FOR I := 0 TO CodeEditorThemeSourceCount - 1 DO
+    IF SameText(ThemeSourceList[I].Name, Name) THEN BEGIN
+      Source := ThemeSourceList[I];
+      Exit(True);
+    END;
+  Result := False;
+END;
 
 TYPE
   // One writer/reader pair shared by the registry and INI backends, so the
@@ -193,6 +273,7 @@ BEGIN
   FontSize := Editor.Font.Size;
   FontStyle := Editor.Font.Style;
   ThemeMode := Editor.ThemeMode;
+  ThemeSource := '';
   Background := Editor.Theme.Background;
   Text := Editor.Theme.Text;
   GutterBackground := Editor.Theme.GutterBackground;
@@ -203,6 +284,8 @@ BEGIN
 END;
 
 PROCEDURE TCodeEditorSettingsValues.ApplyTo(Editor: TCodeEditor);
+VAR
+  Source            : TCodeEditorThemeSource;
 BEGIN
   Editor.Options.TabSize := TabSize;
   Editor.Options.BracketMatching := BracketMatching;
@@ -233,6 +316,11 @@ BEGIN
   Editor.Theme.GutterBorder := GutterBorder;
   Editor.Theme.SelectionBackground := SelectionBackground;
   Editor.Theme.SelectionText := SelectionText;
+  // A registered source (e.g. the DevExpress skin) overrides the colours
+  // above; an unregistered name - the host no longer links that bridge -
+  // leaves them as they are.
+  IF (ThemeSource <> '') AND FindCodeEditorThemeSource(ThemeSource, Source) THEN
+    Source.Apply(Editor);
 END;
 
 { Value names: one place for both backends. }
@@ -259,6 +347,7 @@ BEGIN
   Store.WriteBool('Font.Bold', fsBold IN V.FontStyle);
   Store.WriteBool('Font.Italic', fsItalic IN V.FontStyle);
   Store.WriteInt('ThemeMode', Ord(V.ThemeMode));
+  Store.WriteStr('ThemeSource', V.ThemeSource);
   Store.WriteInt('Colour.Background', V.Background);
   Store.WriteInt('Colour.Text', V.Text);
   Store.WriteInt('Colour.GutterBackground', V.GutterBackground);
@@ -307,6 +396,7 @@ BEGIN
     Include(V.FontStyle, fsItalic);
   V.ThemeMode := TCodeEditorThemeMode(ClampOrd(Store.ReadInt('ThemeMode', Ord(V.ThemeMode)),
     Ord(High(TCodeEditorThemeMode))));
+  V.ThemeSource := Store.ReadStr('ThemeSource', V.ThemeSource);
   V.Background := Store.ReadInt('Colour.Background', V.Background);
   V.Text := Store.ReadInt('Colour.Text', V.Text);
   V.GutterBackground := Store.ReadInt('Colour.GutterBackground', V.GutterBackground);
@@ -449,11 +539,13 @@ FUNCTION TCodeEditorSettings.CurrentValues: TCodeEditorSettingsValues;
 BEGIN
   RequireEditor('CurrentValues');
   Result.ReadFrom(FEditor);
+  Result.ThemeSource := FThemeSource;
 END;
 
 PROCEDURE TCodeEditorSettings.ApplyValues(CONST Values: TCodeEditorSettingsValues);
 BEGIN
   RequireEditor('ApplyValues');
+  FThemeSource := Values.ThemeSource;
   Values.ApplyTo(FEditor);
   IF Assigned(FOnApplied) THEN
     FOnApplied(Self);
@@ -510,7 +602,7 @@ VAR
 BEGIN
   RequireEditor('SaveSettings');
   RequirePath('SaveSettings');
-  V.ReadFrom(FEditor);
+  V := CurrentValues;                   // includes ThemeSource, which the editor can't report
   Reg := TRegistry.Create(KEY_WRITE);
   TRY
     Reg.RootKey := HKEY_CURRENT_USER;
@@ -606,5 +698,10 @@ BEGIN
   RequireEditor('Execute');
   Result := TCodeEditorSettingsDialog.Execute(Self);
 END;
+
+INITIALIZATION
+
+FINALIZATION
+  FreeAndNil(ThemeSourceList);
 
 END.

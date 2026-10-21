@@ -14,7 +14,9 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   INI-format file (`ImportFromFile` / `ExportToFile` do the same in code).
   `VisibleItems` trims the dialog to the settings that suit the editor, e.g.
   a log viewer. Stored: everything in `Options`, font, zoom, scrollbar style,
-  theme mode and the theme colours. See `docs/settings.md`. Palette icons
+  theme mode and the theme colours. Hosts can register extra colour modes
+  with `RegisterCodeEditorThemeSource`; `CodeEdit.DevExpressTheme` registers
+  "Follow the DevExpress skin", stored as `ThemeSource`. See `docs/settings.md`. Palette icons
   added for it and for `TCodeEditorPrinter` (`Packages\Icons\MakeIcons.ps1`).
   The `CodeEditDemo2` sample has an "Editor Options..." button wired to one,
   loading the saved preferences at startup. The ScrEdit sample shows the
