@@ -24,7 +24,7 @@ USES
   CodeEdit.DevExpressTheme,
   // Linking this swaps the options dialog for one built from DevExpress
   // controls, so it follows the skin like the rest of the form.
-  CodeEdit.SettingsDlgDX;
+  CodeEdit.SettingsDlgDX, Vcl.Menus, dxCore, cxClasses;
 
 CONST
   cDelphi           =
