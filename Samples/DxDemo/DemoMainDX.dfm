@@ -50,7 +50,7 @@ object FormDX: TFormDX
       end>
     ExplicitLeft = 216
   end
-  object StatusBar1: TStatusBar
+  object StatusBar1: TdxStatusBar
     Left = 0
     Top = 1009
     Width = 1293
@@ -60,31 +60,30 @@ object FormDX: TFormDX
     Margins.Right = 6
     Margins.Bottom = 6
     Panels = <>
+    PaintStyle = stpsUseLookAndFeel
+    SimplePanelStyle.Active = True
   end
-  object Panel1: TPanel
+  object Panel1: TcxGroupBox
     Left = 0
     Top = 0
-    Width = 1293
-    Height = 146
     Margins.Left = 6
     Margins.Top = 6
     Margins.Right = 6
     Margins.Bottom = 6
     Align = alTop
+    PanelStyle.Active = True
     TabOrder = 2
-    object ComboBox1: TComboBox
+    Height = 146
+    Width = 1293
+    object ComboBox1: TcxComboBox
       Left = 32
       Top = 22
-      Width = 370
-      Height = 40
       Margins.Left = 6
       Margins.Top = 6
       Margins.Right = 6
       Margins.Bottom = 6
-      Style = csDropDownList
-      TabOrder = 0
-      OnChange = ComboBox1Change
-      Items.Strings = (
+      Properties.DropDownListStyle = lsFixedList
+      Properties.Items.Strings = (
         'Delphi'
         'Javascript'
         'SQL'
@@ -94,21 +93,24 @@ object FormDX: TFormDX
         'Ini'
         'Yaml'
         'Python')
+      Properties.OnChange = ComboBox1Change
+      TabOrder = 0
+      Width = 370
     end
-    object CheckBox1: TCheckBox
+    object CheckBox1: TcxCheckBox
       Left = 432
       Top = 26
-      Width = 194
-      Height = 34
       Margins.Left = 6
       Margins.Top = 6
       Margins.Right = 6
       Margins.Bottom = 6
       Caption = 'Read-Only'
       TabOrder = 1
+      Transparent = True
       OnClick = CheckBox1Click
+      Width = 194
     end
-    object ButtonTemplates: TButton
+    object ButtonTemplates: TcxButton
       Left = 656
       Top = 18
       Width = 240
@@ -121,7 +123,7 @@ object FormDX: TFormDX
       TabOrder = 2
       OnClick = ButtonTemplatesClick
     end
-    object ButtonOptions: TButton
+    object ButtonOptions: TcxButton
       Left = 912
       Top = 18
       Width = 240
@@ -134,29 +136,27 @@ object FormDX: TFormDX
       TabOrder = 3
       OnClick = ButtonOptionsClick
     end
-    object LabelSkin: TLabel
+    object LabelSkin: TcxLabel
       Left = 32
-      Top = 92
-      Width = 160
-      Height = 32
+      Top = 90
       Margins.Left = 6
       Margins.Top = 6
       Margins.Right = 6
       Margins.Bottom = 6
       Caption = 'DevExpress skin:'
+      Transparent = True
     end
-    object ComboSkin: TComboBox
+    object ComboSkin: TcxComboBox
       Left = 232
       Top = 86
-      Width = 480
-      Height = 40
       Margins.Left = 6
       Margins.Top = 6
       Margins.Right = 6
       Margins.Bottom = 6
-      Style = csDropDownList
+      Properties.DropDownListStyle = lsFixedList
+      Properties.OnChange = ComboSkinChange
       TabOrder = 4
-      OnChange = ComboSkinChange
+      Width = 480
     end
   end
   object DelphiCodeHighlighter1: TDelphiCodeHighlighter

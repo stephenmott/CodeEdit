@@ -14,6 +14,8 @@ USES
   // the CodeEdit bridge that maps the active skin's palette onto the editor
   // theme (and registers "Follow the DevExpress skin" with the settings
   // dialog).
+  cxGraphics, cxControls, cxContainer, cxEdit, cxTextEdit, cxMaskEdit, cxDropDownEdit,
+  cxCheckBox, cxButtons, cxLabel, cxGroupBox, dxStatusBar,
   cxLookAndFeels, cxLookAndFeelPainters, dxSkinsCore, dxSkinsForm,
   dxSkinBasic, dxSkinOffice2019Colorful, dxSkinOffice2019Black, dxSkinOffice2019White,
   dxSkinOffice2019DarkGray, dxSkinOffice2016Colorful, dxSkinOffice2016Dark,
@@ -302,14 +304,14 @@ CONST
 TYPE
   TFormDX = CLASS(TForm)
     CodeEditor1: TCodeEditor;
-    StatusBar1: TStatusBar;
+    StatusBar1: TdxStatusBar;
     DelphiCodeHighlighter1: TDelphiCodeHighlighter;
     JavaScriptCodeHighlighter1: TJavaScriptCodeHighlighter;
     SqlCodeHighlighter1: TSqlCodeHighlighter;
-    Panel1: TPanel;
-    ComboBox1: TComboBox;
-    CheckBox1: TCheckBox;
-    ButtonTemplates: TButton;
+    Panel1: TcxGroupBox;
+    ComboBox1: TcxComboBox;
+    CheckBox1: TcxCheckBox;
+    ButtonTemplates: TcxButton;
     KeywordCompletionProvider1: TKeywordCompletionProvider;
     PythonCodeHighlighter1: TPythonCodeHighlighter;
     YamlCodeHighlighter1: TYamlCodeHighlighter;
@@ -317,11 +319,11 @@ TYPE
     PowerShellCodeHighlighter1: TPowerShellCodeHighlighter;
     BatchCodeHighlighter1: TBatchCodeHighlighter;
     TungliCodeHighlighter1: TTungliCodeHighlighter;
-    ButtonOptions: TButton;
+    ButtonOptions: TcxButton;
     EditorSettings1: TCodeEditorSettings;
     dxSkinController1: TdxSkinController;
-    LabelSkin: TLabel;
-    ComboSkin: TComboBox;
+    LabelSkin: TcxLabel;
+    ComboSkin: TcxComboBox;
     PROCEDURE FormCreate(Sender: TObject);
     PROCEDURE ComboBox1Change(Sender: TObject);
     PROCEDURE ComboSkinChange(Sender: TObject);
@@ -378,19 +380,19 @@ VAR
   I                 : Integer;
   Painter           : TcxCustomLookAndFeelPainter;
 BEGIN
-  ComboSkin.Items.BeginUpdate;
+  ComboSkin.Properties.Items.BeginUpdate;
   TRY
-    ComboSkin.Items.Clear;
+    ComboSkin.Properties.Items.Clear;
     FOR I := 0 TO cxLookAndFeelPaintersManager.Count - 1 DO BEGIN
       Painter := cxLookAndFeelPaintersManager[I];
       IF Painter.LookAndFeelStyle = lfsSkin THEN
-        ComboSkin.Items.Add(Painter.LookAndFeelName);
+        ComboSkin.Properties.Items.Add(Painter.LookAndFeelName);
     END;
   FINALLY
-    ComboSkin.Items.EndUpdate;
+    ComboSkin.Properties.Items.EndUpdate;
   END;
-  ComboSkin.ItemIndex := ComboSkin.Items.IndexOf(dxSkinController1.SkinName);
-  IF (ComboSkin.ItemIndex < 0) AND (ComboSkin.Items.Count > 0) THEN
+  ComboSkin.ItemIndex := ComboSkin.Properties.Items.IndexOf(dxSkinController1.SkinName);
+  IF (ComboSkin.ItemIndex < 0) AND (ComboSkin.Properties.Items.Count > 0) THEN
     ComboSkin.ItemIndex := 0;
 END;
 
@@ -399,7 +401,7 @@ BEGIN
   // Changing the skin repaints every DevExpress control; the bridge attached
   // in FormCreate hears the look-and-feel change and recolours the editor.
   IF ComboSkin.ItemIndex >= 0 THEN
-    dxSkinController1.SkinName := ComboSkin.Items[ComboSkin.ItemIndex];
+    dxSkinController1.SkinName := ComboSkin.Properties.Items[ComboSkin.ItemIndex];
 END;
 
 PROCEDURE TFormDX.ButtonTemplatesClick(Sender: TObject);
@@ -419,7 +421,7 @@ END;
 
 PROCEDURE TFormDX.EditorSettings1Applied(Sender: TObject);
 BEGIN
-  StatusBar1.SimpleText := Format('Editor settings applied: %s %dpt, zoom %d%%, tab size %d%s',
+  StatusBar1.SimplePanelStyle.Text := Format('Editor settings applied: %s %dpt, zoom %d%%, tab size %d%s',
     [CodeEditor1.Font.Name, CodeEditor1.Font.Size, CodeEditor1.Zoom, CodeEditor1.Options.TabSize,
     IfThenStr(CodeEditor1.Options.WordWrap, ', word wrap', '')]);
 END;
