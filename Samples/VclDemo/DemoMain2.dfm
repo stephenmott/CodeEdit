@@ -121,6 +121,19 @@ object Form2: TForm2
       TabOrder = 2
       OnClick = ButtonTemplatesClick
     end
+    object ButtonOptions: TButton
+      Left = 912
+      Top = 18
+      Width = 240
+      Height = 50
+      Margins.Left = 6
+      Margins.Top = 6
+      Margins.Right = 6
+      Margins.Bottom = 6
+      Caption = 'Editor Options...'
+      TabOrder = 3
+      OnClick = ButtonOptionsClick
+    end
   end
   object DelphiCodeHighlighter1: TDelphiCodeHighlighter
     Left = 376
@@ -163,5 +176,13 @@ object Form2: TForm2
   object TungliCodeHighlighter1: TTungliCodeHighlighter
     Left = 368
     Top = 696
+  end
+  object EditorSettings1: TCodeEditorSettings
+    Editor = CodeEditor1
+    RegistryPath = 'Software\CodeEdit\Demo2'
+    Title = 'CodeEdit Demo - Editor Options'
+    OnApplied = EditorSettings1Applied
+    Left = 536
+    Top = 272
   end
 end

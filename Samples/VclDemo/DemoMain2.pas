@@ -7,7 +7,7 @@ USES
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.StdCtrls, Vcl.ExtCtrls,
 
   CodeEdit.Editor, CodeEdit.Completion, CodeEdit.Highlighter, CodeEdit.Templates,
-  CodeEdit.TemplateEditorDlg;
+  CodeEdit.TemplateEditorDlg, CodeEdit.Settings;
 
 CONST
   cDelphi           =
@@ -305,10 +305,14 @@ TYPE
     PowerShellCodeHighlighter1: TPowerShellCodeHighlighter;
     BatchCodeHighlighter1: TBatchCodeHighlighter;
     TungliCodeHighlighter1: TTungliCodeHighlighter;
+    ButtonOptions: TButton;
+    EditorSettings1: TCodeEditorSettings;
     PROCEDURE FormCreate(Sender: TObject);
     PROCEDURE ComboBox1Change(Sender: TObject);
     PROCEDURE CheckBox1Click(Sender: TObject);
     PROCEDURE ButtonTemplatesClick(Sender: TObject);
+    PROCEDURE ButtonOptionsClick(Sender: TObject);
+    PROCEDURE EditorSettings1Applied(Sender: TObject);
     PROCEDURE KeywordCompletionProvider1GetCompletions(Sender: TObject;
       CONST Context: TCodeCompletionContext; Items: TCodeCompletionItems);
     PROCEDURE KeywordCompletionProvider1GetSignatureHelp(Sender: TObject;
@@ -335,6 +339,14 @@ IMPLEMENTATION
 
 {$R *.dfm}
 
+FUNCTION IfThenStr(Cond: Boolean; CONST IfTrue, IfFalse: STRING): STRING;
+BEGIN
+  IF Cond THEN
+    Result := IfTrue
+  ELSE
+    Result := IfFalse;
+END;
+
 PROCEDURE TForm2.CheckBox1Click(Sender: TObject);
 BEGIN
   CodeEditor1.ReadOnly := CheckBox1.Checked;
@@ -345,6 +357,22 @@ PROCEDURE TForm2.ButtonTemplatesClick(Sender: TObject);
 BEGIN
   IF TCodeTemplateEditorDialog.Execute(FTemplateProvider) THEN
     CodeEditor1.SetFocus;
+END;
+
+PROCEDURE TForm2.ButtonOptionsClick(Sender: TObject);
+BEGIN
+  // Editor options dialog: applies on OK/Apply and saves under
+  // HKCU\Software\CodeEdit\Demo2 (EditorSettings1.RegistryPath), which
+  // FormCreate loads again next time.
+  EditorSettings1.Execute;
+  CodeEditor1.SetFocus;
+END;
+
+PROCEDURE TForm2.EditorSettings1Applied(Sender: TObject);
+BEGIN
+  StatusBar1.SimpleText := Format('Editor settings applied: %s %dpt, zoom %d%%, tab size %d%s',
+    [CodeEditor1.Font.Name, CodeEditor1.Font.Size, CodeEditor1.Zoom, CodeEditor1.Options.TabSize,
+    IfThenStr(CodeEditor1.Options.WordWrap, ', word wrap', '')]);
 END;
 
 PROCEDURE TForm2.ComboBox1Change(Sender: TObject);
@@ -533,6 +561,10 @@ BEGIN
   // Hover-to-evaluate: a debugger returns the variable's live value here; the
   // demo just echoes the identifier under the mouse.
   CodeEditor1.OnGetHint := CodeEditor1GetHint;
+
+  // Preferences the user saved through the Options dialog override the
+  // defaults set above; on first run the key is absent and nothing changes.
+  EditorSettings1.LoadSettings;
 
   ComboBox1.ItemIndex := 0;
 END;

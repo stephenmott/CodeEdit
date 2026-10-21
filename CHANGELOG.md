@@ -16,6 +16,8 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   a log viewer. Stored: everything in `Options`, font, zoom, scrollbar style,
   theme mode and the theme colours. See `docs/settings.md`. Palette icons
   added for it and for `TCodeEditorPrinter` (`Packages\Icons\MakeIcons.ps1`).
+  The `CodeEditDemo2` sample has an "Editor Options..." button wired to one,
+  loading the saved preferences at startup.
 - Minimap draws real text: each line is rendered with a bold font at three
   times the map size, shrunk with a halftone average and contrast-boosted,
   so word shapes, line lengths and token colours survive at 3 px per line
