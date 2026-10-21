@@ -71,7 +71,7 @@ attribution is appreciated.
 - `Source\CodeEdit.Register.pas` — registers everything on the `CodeEdit`
   palette page
 - `Packages\CodeEditVcl.dpk` — design-time package
-- `Samples\VclDemo`, `Samples\ScrEdit` — demo applications
+- `Samples\VclDemo` — demo applications
 - `Tests\TestHighlighterState.dpr` — console regression test for the
   multi-line tokenizer state
 

@@ -19,11 +19,10 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   "Follow the DevExpress skin", stored as `ThemeSource`. See `docs/settings.md`. Palette icons
   added for it and for `TCodeEditorPrinter` (`Packages\Icons\MakeIcons.ps1`).
   The `CodeEditDemo2` sample has an "Editor Options..." button wired to one,
-  loading the saved preferences at startup. The ScrEdit sample shows the
-  per-editor pattern: one component shared by the production and test
-  script editors (the test editor mirrors it through `OnApplied`) and a
-  second, trimmed to wrap, font, zoom and colours, for the output pane;
-  Edit > Editor Options... opens whichever the focused pane uses.
+  loading the saved preferences at startup. For several editors with
+  different needs, use one component per editor (or per group sharing a
+  `RegistryPath`) and trim each with `VisibleItems`; `OnApplied` can mirror
+  one editor's values onto another with `CurrentValues.ApplyTo`.
 - Minimap draws real text: each line is rendered with a bold font at three
   times the map size, shrunk with a halftone average and contrast-boosted,
   so word shapes, line lengths and token colours survive at 3 px per line
@@ -42,14 +41,13 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   `$PAGES`, `$DATE`, `$TIME` macros and `left|centre|right` sections, word
   wrap at the right margin, millimetre margins, and optional
   selection-only output. `Paginate` + `DrawPage` are public for drawing
-  into any canvas. The ScrEdit sample's Print and Preview buttons use it.
-  `TCodeEditor.LineTokens`, `HasSelection`, `SelectionStart` and
+  into any canvas. `TCodeEditor.LineTokens`, `HasSelection`, `SelectionStart` and
   `SelectionEnd` are now public for it. See `docs/printing.md`.
 - `GotoRoutineBody(HeaderLine)` / `FindRoutineBodyLine(HeaderLine)`: from a
   routine's header line, find its own `BEGIN` (skipping `var`/`const`
   sections and nested local routines by indentation), put the caret on the
   line after it and scroll so the header is still visible above. For
-  procedure-list navigation; the ScrEdit sample uses it.
+  procedure-list navigation.
 - Minimap hover preview (`Options.MinimapPreview`, default on): resting the
   mouse over the minimap pops up a full-size, syntax-coloured preview of the
   seven lines around the one under the mouse (hovered line highlighted in the
@@ -113,8 +111,14 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   quarter of the way down the view (at least two rows) instead of the top
   edge, so a goto-line / procedure-list jump keeps the routine header in
   sight when the caret lands in the body. Keyboard and mouse caret moves are
-  unchanged. The ScrEdit sample's procedure list no longer forces `TopLine`
-  after setting the caret.
+  unchanged. Don't force `TopLine` after setting `Caret`.
+
+### Removed
+- The ScrEdit sample. It was a copy of a host application's script-editor
+  form and could not build outside that application's library (it pulled
+  in its utility units, a Tungli interpreter and FastStrings); the host has
+  moved on past it, so it was dropped rather than stubbed. `VclDemo`
+  (`CodeEditDemo`, `CodeEditDemo2`) remains the sample.
 
 ### Fixed
 - Caret/anchor (and the top line) are clamped back into the document on any
