@@ -113,6 +113,12 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   sight when the caret lands in the body. Keyboard and mouse caret moves are
   unchanged. Don't force `TopLine` after setting `Caret`.
 
+### Added (samples)
+- `Samples\DxDemo\CodeEditDemoDX`: the Demo2 form with a `TdxSkinController`
+  and skin picker, `TCodeEditorDevExpressTheme` keeping the editor's colours
+  in step with the skin, and a `TCodeEditorSettings` preset to "Follow the
+  DevExpress skin". Needs the DevExpress VCL library.
+
 ### Removed
 - The ScrEdit sample. It was a copy of a host application's script-editor
   form and could not build outside that application's library (it pulled

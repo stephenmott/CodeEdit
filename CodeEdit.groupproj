@@ -12,6 +12,9 @@
         <Projects Include="Samples\VclDemo\CodeEditDemo2.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="Samples\DxDemo\CodeEditDemoDX.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -47,14 +50,23 @@
     <Target Name="CodeEditDemo2:Make">
         <MSBuild Projects="Samples\VclDemo\CodeEditDemo2.dproj" Targets="Make"/>
     </Target>
+    <Target Name="CodeEditDemoDX">
+        <MSBuild Projects="Samples\DxDemo\CodeEditDemoDX.dproj"/>
+    </Target>
+    <Target Name="CodeEditDemoDX:Clean">
+        <MSBuild Projects="Samples\DxDemo\CodeEditDemoDX.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="CodeEditDemoDX:Make">
+        <MSBuild Projects="Samples\DxDemo\CodeEditDemoDX.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="CodeEditVcl;CodeEditDemo;CodeEditDemo2"/>
+        <CallTarget Targets="CodeEditVcl;CodeEditDemo;CodeEditDemo2;CodeEditDemoDX"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="CodeEditVcl:Clean;CodeEditDemo:Clean;CodeEditDemo2:Clean"/>
+        <CallTarget Targets="CodeEditVcl:Clean;CodeEditDemo:Clean;CodeEditDemo2:Clean;CodeEditDemoDX:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="CodeEditVcl:Make;CodeEditDemo:Make;CodeEditDemo2:Make"/>
+        <CallTarget Targets="CodeEditVcl:Make;CodeEditDemo:Make;CodeEditDemo2:Make;CodeEditDemoDX:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>

@@ -71,7 +71,10 @@ attribution is appreciated.
 - `Source\CodeEdit.Register.pas` — registers everything on the `CodeEdit`
   palette page
 - `Packages\CodeEditVcl.dpk` — design-time package
-- `Samples\VclDemo` — demo applications
+- `Samples\VclDemo` — demo applications (`CodeEditDemo`, `CodeEditDemo2`)
+- `Samples\DxDemo` — `CodeEditDemo2` with DevExpress skins: skin picker,
+  the skin bridge keeping the editor's colours in step, and the settings
+  dialog's "Follow the DevExpress skin" choice (needs DevExpress VCL)
 - `Tests\TestHighlighterState.dpr` — console regression test for the
   multi-line tokenizer state
 
