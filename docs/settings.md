@@ -63,6 +63,16 @@ option is on. The colour boxes are enabled only when the colour mode is
 *Custom*; *Follow the VCL style* takes the palette from the active style
 instead.
 
+## DevExpress applications
+
+The package's dialog is built from VCL controls, which a DevExpress skin
+controller paints only partly (form and buttons, not the page control,
+edits or combos). `CodeEdit.SettingsDlgDX` is the same dialog built from
+`cx` controls; add it to the application's uses (it is not in the package,
+like `CodeEdit.DevExpressTheme`) and `Execute` opens it instead. It sets
+the `CodeEditorSettingsDialogProc` hook in its initialization section; a
+host can point that at its own dialog for the same effect.
+
 ## Theme sources (DevExpress skins and the like)
 
 The core package cannot depend on DevExpress, so other palettes plug in:

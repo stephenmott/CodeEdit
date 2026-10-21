@@ -16,7 +16,11 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
   a log viewer. Stored: everything in `Options`, font, zoom, scrollbar style,
   theme mode and the theme colours. Hosts can register extra colour modes
   with `RegisterCodeEditorThemeSource`; `CodeEdit.DevExpressTheme` registers
-  "Follow the DevExpress skin", stored as `ThemeSource`. See `docs/settings.md`. Palette icons
+  "Follow the DevExpress skin", stored as `ThemeSource`. DevExpress
+  applications add `CodeEdit.SettingsDlgDX` (not in the package) to get the
+  dialog built from `cx` controls, which the skin controller paints; it
+  plugs in through the `CodeEditorSettingsDialogProc` hook. See
+  `docs/settings.md`. Palette icons
   added for it and for `TCodeEditorPrinter` (`Packages\Icons\MakeIcons.ps1`).
   The `CodeEditDemo2` sample has an "Editor Options..." button wired to one,
   loading the saved preferences at startup. For several editors with

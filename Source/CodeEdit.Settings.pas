@@ -140,9 +140,17 @@ TYPE
     PROPERTY OnApplied: TNotifyEvent READ FOnApplied WRITE FOnApplied;
   END;
 
+  // Replacement for the options dialog. CodeEdit.SettingsDlgDX (DevExpress
+  // controls, skinned by the app's skin controller) sets this when linked;
+  // nil means the package's own VCL dialog. Must apply/save like it does.
+  TCodeEditorSettingsDialogProc = FUNCTION(Settings: TCodeEditorSettings): Boolean;
+
 CONST
   AllCodeEditorSettingItems = [Low(TCodeEditorSettingItem)..High(TCodeEditorSettingItem)];
   CodeEditorSettingsIniSection = 'CodeEditor';
+
+VAR
+  CodeEditorSettingsDialogProc: TCodeEditorSettingsDialogProc = NIL;
 
 PROCEDURE RegisterCodeEditorThemeSource(CONST Name, Caption: STRING;
   Apply: TCodeEditorThemeSourceProc);
@@ -696,7 +704,10 @@ END;
 FUNCTION TCodeEditorSettings.Execute: Boolean;
 BEGIN
   RequireEditor('Execute');
-  Result := TCodeEditorSettingsDialog.Execute(Self);
+  IF Assigned(CodeEditorSettingsDialogProc) THEN
+    Result := CodeEditorSettingsDialogProc(Self)
+  ELSE
+    Result := TCodeEditorSettingsDialog.Execute(Self);
 END;
 
 INITIALIZATION

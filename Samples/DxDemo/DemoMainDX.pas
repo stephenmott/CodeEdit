@@ -21,7 +21,10 @@ USES
   dxSkinOffice2019DarkGray, dxSkinOffice2016Colorful, dxSkinOffice2016Dark,
   dxSkinVisualStudio2013Dark, dxSkinVisualStudio2013Light, dxSkinWXI, dxSkinTheBezier,
   dxSkinBlueprint, dxSkinDarkSide, dxSkinMetropolisDark,
-  CodeEdit.DevExpressTheme;
+  CodeEdit.DevExpressTheme,
+  // Linking this swaps the options dialog for one built from DevExpress
+  // controls, so it follows the skin like the rest of the form.
+  CodeEdit.SettingsDlgDX;
 
 CONST
   cDelphi           =
