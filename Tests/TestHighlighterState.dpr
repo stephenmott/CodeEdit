@@ -47,6 +47,24 @@ begin
   Defined := True;
 end;
 
+// A and B are defined for the stand-alone evaluator checks.
+function TestDefined(const Symbol: string): Boolean;
+begin
+  Result := SameText(Symbol, 'A') or SameText(Symbol, 'B');
+end;
+
+function Eval(const Expr: string): Boolean;
+var
+  Valid: Boolean;
+begin
+  Result := EvaluateConditionalExpression(Expr, TestDefined, Valid);
+end;
+
+function EvalValid(const Expr: string): Boolean;
+begin
+  EvaluateConditionalExpression(Expr, TestDefined, Result);
+end;
+
 var
   DL: TDelphiCodeHighlighter;
   PY: TPythonCodeHighlighter;
@@ -171,6 +189,41 @@ begin
       Tokens := DL.TokenizeLineState('{#endif}', S3, S3);
     Check(S3 = 0, 'Cond: 21 endifs return to state 0');
 
+    // {#if expr} / {#elseif expr} with the shared evaluator (DEBUG is defined).
+    Tokens := DL.TokenizeLineState('{#if defined(DEBUG) or defined(FINAL)} a {#endif}', 0, S1);
+    Check((KindAt(Tokens, 40) = tkIdentifier) and (S1 = 0), 'If: defined or defined');
+    Tokens := DL.TokenizeLineState('{#if defined(FINAL) and defined(DEBUG)} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 41) = tkInactive, 'If: false and true');
+    Tokens := DL.TokenizeLineState('{#if not defined(FINAL)} a {#ifend}', 0, S1);
+    Check((KindAt(Tokens, 26) = tkIdentifier) and (S1 = 0), 'If: not, and {#ifend} closes');
+    Tokens := DL.TokenizeLineState('{#if defined(FINAL) or defined(DEBUG) and defined(FINAL)} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 59) = tkInactive, 'If: and binds tighter than or');
+    Tokens := DL.TokenizeLineState('{#if (defined(FINAL) or defined(DEBUG)) and defined(DEBUG)} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 61) = tkIdentifier, 'If: brackets override precedence');
+    Tokens := DL.TokenizeLineState('{#IF Defined(debug)} a {#ENDIF}', 0, S1);
+    Check(KindAt(Tokens, 22) = tkIdentifier, 'If: case-insensitive words');
+    Tokens := DL.TokenizeLineState('{#if defined(DEBUG} a {#endif}', 0, S1);
+    Check((KindAt(Tokens, 1) = tkDirective) and (KindAt(Tokens, 21) = tkIdentifier),
+      'If: malformed expression shows the branch rather than hiding it');
+    Tokens := DL.TokenizeLineState('{#if DEBUG} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 13) = tkIdentifier, 'If: bare symbol is invalid, so shown');
+    // elseif chains: first true branch wins, the rest stay off.
+    Tokens := DL.TokenizeLineState('{#if defined(FINAL)} a {#elseif defined(DEBUG)} b {#elseif true} c {#else} d {#endif}', 0, S1);
+    Check((KindAt(Tokens, 22) = tkInactive) and (KindAt(Tokens, 49) = tkIdentifier) and
+      (KindAt(Tokens, 66) = tkInactive) and (KindAt(Tokens, 76) = tkInactive) and (S1 = 0),
+      'If: elseif chain - only the first true branch is live');
+    Tokens := DL.TokenizeLineState('{#if false} a {#elseif false} b {#else} c {#endif}', 0, S1);
+    Check((KindAt(Tokens, 13) = tkInactive) and (KindAt(Tokens, 31) = tkInactive) and
+      (KindAt(Tokens, 41) = tkIdentifier), 'If: else after false elseifs is live');
+    Tokens := DL.TokenizeLineState('{#ifdef DEBUG} a {#elseif true} b {#endif}', 0, S1);
+    Check((KindAt(Tokens, 16) = tkIdentifier) and (KindAt(Tokens, 33) = tkInactive),
+      'If: elseif after a taken ifdef stays off');
+    Tokens := DL.TokenizeLineState('{#if defined(FINAL)} {#if true} q {#elseif true} r {#endif} {#else} s {#endif}', 0, S1);
+    Check((KindAt(Tokens, 33) = tkInactive) and (KindAt(Tokens, 50) = tkInactive) and
+      (KindAt(Tokens, 69) = tkIdentifier), 'If: nested chain inside a dead branch stays dead');
+    Tokens := DL.TokenizeLineState('{#define FINAL} {#if defined(FINAL) and not defined(NOPE)} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 60) = tkIdentifier, 'If: text defines feed the expression');
+
     // Stray else/endif are harmless; the event can override the list.
     Tokens := DL.TokenizeLineState('{#endif} {#else} a', 0, S1);
     Check((KindAt(Tokens, 18) = tkIdentifier) and (S1 = 0), 'Cond: stray endif/else ignored');
@@ -193,6 +246,25 @@ begin
   finally
     DL.Free;
   end;
+
+  // The shared evaluator on its own, as a preprocessor would call it.
+  Check(Eval('defined(A)') and not Eval('defined(Z)'), 'Eval: defined');
+  Check(Eval('defined(a) AND Defined(B)'), 'Eval: and, case-insensitive');
+  Check(Eval('defined(Z) or defined(B)') and not Eval('defined(Z) or defined(Y)'), 'Eval: or');
+  Check(not Eval('not defined(A)') and Eval('not defined(Z)'), 'Eval: not');
+  Check(not Eval('not not defined(Z)'), 'Eval: not not');
+  Check(Eval('defined(Z) or defined(A) and defined(B)') and not Eval('(defined(Z) or defined(A)) and defined(Z)'),
+    'Eval: precedence and brackets');
+  Check(Eval('true') and not Eval('false') and Eval('true or false'), 'Eval: true/false');
+  Check(Eval('( ( defined ( A ) ) )'), 'Eval: whitespace and nested brackets');
+  Check(not EvalValid(''), 'Eval: empty is invalid');
+  Check(not EvalValid('A'), 'Eval: bare symbol is invalid');
+  Check(not EvalValid('defined(A'), 'Eval: unbalanced bracket is invalid');
+  Check(not EvalValid('defined(A) defined(B)'), 'Eval: missing operator is invalid');
+  Check(not EvalValid('defined(A) and'), 'Eval: dangling operator is invalid');
+  Check(not EvalValid('defined(A) && defined(B)'), 'Eval: C operators are invalid');
+  Check(not EvalValid('defined()'), 'Eval: empty defined() is invalid');
+  Check(not Eval('defined(A'), 'Eval: an invalid expression evaluates False');
 
   PY := TPythonCodeHighlighter.Create(nil);
   try

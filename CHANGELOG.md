@@ -7,7 +7,13 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 
 ### Added
 - Conditional compilation in `TDelphiCodeHighlighter`: `{#define X}`,
-  `{#undef X}`, `{#ifdef X}`, `{#ifndef X}`, `{#else}` and `{#endif}` are
+  `{#undef X}`, `{#ifdef X}`, `{#ifndef X}`, `{#if expr}`, `{#elseif expr}`,
+  `{#else}` and `{#endif}` / `{#ifend}` are recognised. `{#if}` expressions
+  take `defined(X)`, `not`, `and`, `or`, brackets, `true` and `false` with
+  Delphi's precedence, evaluated by the public
+  `EvaluateConditionalExpression(Expr, IsDefined, out Valid)` so a
+  preprocessor can share the exact same grammar (the highlighter shows a
+  branch whose expression is invalid rather than hiding it). Directives are
   recognised (prefix per the new `ConditionalPrefix` property, `{#` by
   default, `{$` for Delphi itself), drawn in a new `tkDirective` colour, and
   everything in a branch that is compiled out is reported as the new

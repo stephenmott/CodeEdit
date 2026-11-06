@@ -104,6 +104,10 @@ TYPE
       so its else stays inactive too. }
     CLASS FUNCTION CondActive(CONST Levels: STRING): Boolean; STATIC;
     CLASS PROCEDURE CondPush(VAR Levels: STRING; Active, Taken: Boolean); STATIC;
+    // else = ElseIf(True). The branch goes live only when nothing in the
+    // chain has been taken yet and Condition holds; otherwise it stays
+    // inactive, remembering whether a branch was taken for the next one.
+    CLASS PROCEDURE CondElseIf(VAR Levels: STRING; Condition: Boolean); STATIC;
     CLASS PROCEDURE CondElse(VAR Levels: STRING); STATIC;
     CLASS PROCEDURE CondPop(VAR Levels: STRING); STATIC;
     { The ';'-separated symbol lists in TCodeLineState. }
@@ -145,6 +149,22 @@ TYPE
   TCodeIsDefinedEvent = PROCEDURE(Sender: TObject; CONST Symbol: STRING; VAR Defined: Boolean)
     OF OBJECT;
 
+  // Answers "is this symbol defined?" for EvaluateConditionalExpression.
+  TCodeIsDefinedFunc = REFERENCE TO FUNCTION(CONST Symbol: STRING): Boolean;
+
+// Evaluates the expression of an "if" / "elseif" conditional directive:
+//   defined(X)   not   and   or   ( )   true   false
+// with Delphi's precedence (not, then and, then or), case-insensitive.
+// Valid comes back False for anything else - an empty expression, a bare
+// symbol without defined(), an unbalanced bracket, a stray word - and the
+// result is then False. The highlighter treats an invalid expression as True
+// so a typo never hides code; a preprocessor should report it instead. Both
+// sides are meant to call this one function so they can never disagree
+// about which branch is live.
+FUNCTION EvaluateConditionalExpression(CONST Expr: STRING; CONST IsDefined: TCodeIsDefinedFunc;
+  OUT Valid: Boolean): Boolean;
+
+TYPE
   TDelphiCodeHighlighter = CLASS(TCustomWordCodeHighlighter)
   PRIVATE
     FDefines: TStringList;
@@ -161,13 +181,16 @@ TYPE
     FUNCTION ReadNumber(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
     FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
     PROCEDURE SetDefaultStyles; OVERRIDE;
-    // {#define X} {#undef X} {#ifdef X} {#ifndef X} {#else} {#endif} (prefix
-    // per ConditionalPrefix, closing brace on the same line). Any other
-    // {#word ...} is coloured as a directive but changes nothing.
+    // {#define X} {#undef X} {#ifdef X} {#ifndef X} {#if expr} {#elseif expr}
+    // {#else} {#endif} / {#ifend} (prefix per ConditionalPrefix, closing brace
+    // on the same line). Any other {#word ...} is coloured as a directive but
+    // changes nothing.
     FUNCTION TryDirective(CONST ALine: STRING; Index: Integer; VAR State: TCodeLineState;
       OUT TokenLength: Integer): Boolean; OVERRIDE;
     // The text's own {#define}/{#undef} so far, then Defines, then OnIsDefined.
     FUNCTION IsDefinedAt(CONST Symbol: STRING; CONST State: TCodeLineState): Boolean; VIRTUAL;
+    // EvaluateConditionalExpression against IsDefinedAt; True when invalid.
+    FUNCTION EvaluateAt(CONST Expr: STRING; CONST State: TCodeLineState): Boolean;
   PUBLIC
     CONSTRUCTOR Create(AOwner: TComponent); OVERRIDE;
     DESTRUCTOR Destroy; OVERRIDE;
@@ -599,19 +622,30 @@ BEGIN
   Levels := Levels + Chr(Ord('0') + Bits);
 END;
 
-CLASS PROCEDURE TCustomWordCodeHighlighter.CondElse(VAR Levels: STRING);
+CLASS PROCEDURE TCustomWordCodeHighlighter.CondElseIf(VAR Levels: STRING; Condition: Boolean);
 VAR
   Bits              : Integer;
+  Taken             : Boolean;
 BEGIN
   IF Levels = '' THEN
-    Exit;                               // stray else
+    Exit;                               // stray else / elseif
   Bits := Ord(Levels[Length(Levels)]) - Ord('0');
-  // Active iff everything above is active and no branch of this chain was.
-  IF CondActive(Copy(Levels, 1, Length(Levels) - 1)) AND (Bits AND CondTakenBit = 0) THEN
+  Taken := Bits AND CondTakenBit <> 0;
+  // Live iff everything above is live, no branch of this chain was yet, and
+  // the condition holds. A false condition leaves the chain still open for
+  // a later elseif/else; a true one closes it.
+  IF CondActive(Copy(Levels, 1, Length(Levels) - 1)) AND NOT Taken AND Condition THEN
     Bits := CondActiveBit OR CondTakenBit
+  ELSE IF Taken THEN
+    Bits := CondTakenBit
   ELSE
-    Bits := CondTakenBit;
+    Bits := 0;
   Levels[Length(Levels)] := Chr(Ord('0') + Bits);
+END;
+
+CLASS PROCEDURE TCustomWordCodeHighlighter.CondElse(VAR Levels: STRING);
+BEGIN
+  CondElseIf(Levels, True);
 END;
 
 CLASS PROCEDURE TCustomWordCodeHighlighter.CondPop(VAR Levels: STRING);
@@ -674,6 +708,134 @@ FUNCTION TCustomWordCodeHighlighter.TryDirective(CONST ALine: STRING; Index: Int
 BEGIN
   TokenLength := 0;
   Result := False;
+END;
+
+// Conditional expressions: a recursive-descent evaluator over
+//   or-expr  := and-expr ( 'or' and-expr )*
+//   and-expr := factor ( 'and' factor )*
+//   factor   := 'not' factor | '(' or-expr ')' | 'defined' '(' symbol ')' | 'true' | 'false'
+// Both operands are always parsed (no short-circuit) so syntax errors are
+// found wherever they are.
+
+FUNCTION EvaluateConditionalExpression(CONST Expr: STRING; CONST IsDefined: TCodeIsDefinedFunc;
+  OUT Valid: Boolean): Boolean;
+VAR
+  P                 : Integer;
+  Tok               : STRING;           // lower-cased word, '(' , ')', '?' for junk, '' at the end
+
+  PROCEDURE Next;
+  VAR
+    Start           : Integer;
+  BEGIN
+    WHILE (P <= Length(Expr)) AND Expr[P].IsWhiteSpace DO
+      Inc(P);
+    IF P > Length(Expr) THEN
+      Tok := ''
+    ELSE IF Expr[P].IsLetter OR (Expr[P] = '_') THEN BEGIN
+      Start := P;
+      WHILE (P <= Length(Expr)) AND (Expr[P].IsLetterOrDigit OR (Expr[P] = '_')) DO
+        Inc(P);
+      Tok := LowerCase(Copy(Expr, Start, P - Start));
+    END ELSE IF CharInSet(Expr[P], ['(', ')']) THEN BEGIN
+      Tok := Expr[P];
+      Inc(P);
+    END ELSE BEGIN
+      Tok := '?';
+      Inc(P);
+    END;
+  END;
+
+  FUNCTION IsWord: Boolean;
+  BEGIN
+    Result := (Tok <> '') AND (Tok <> '(') AND (Tok <> ')') AND (Tok <> '?');
+  END;
+
+  FUNCTION ParseOr: Boolean; FORWARD;
+
+  FUNCTION ParseFactor: Boolean;
+  VAR
+    Symbol          : STRING;
+  BEGIN
+    IF Tok = 'not' THEN BEGIN
+      Next;
+      Result := NOT ParseFactor;
+    END ELSE IF Tok = '(' THEN BEGIN
+      Next;
+      Result := ParseOr;
+      IF Tok = ')' THEN
+        Next
+      ELSE
+        Valid := False;
+    END ELSE IF Tok = 'true' THEN BEGIN
+      Next;
+      Result := True;
+    END ELSE IF Tok = 'false' THEN BEGIN
+      Next;
+      Result := False;
+    END ELSE IF Tok = 'defined' THEN BEGIN
+      Next;
+      Result := False;
+      IF Tok <> '(' THEN
+        Valid := False
+      ELSE BEGIN
+        Next;
+        IF NOT IsWord THEN
+          Valid := False
+        ELSE BEGIN
+          Symbol := Tok;
+          Next;
+          IF Tok <> ')' THEN
+            Valid := False
+          ELSE BEGIN
+            Next;
+            Result := Assigned(IsDefined) AND IsDefined(Symbol);
+          END;
+        END;
+      END;
+    END ELSE BEGIN
+      // A bare symbol, junk or nothing where an operand is required.
+      Valid := False;
+      Result := False;
+      IF Tok <> '' THEN
+        Next;
+    END;
+  END;
+
+  FUNCTION ParseAnd: Boolean;
+  VAR
+    Right           : Boolean;
+  BEGIN
+    Result := ParseFactor;
+    WHILE Valid AND (Tok = 'and') DO BEGIN
+      Next;
+      Right := ParseFactor;
+      Result := Result AND Right;
+    END;
+  END;
+
+  FUNCTION ParseOr: Boolean;
+  VAR
+    Right           : Boolean;
+  BEGIN
+    Result := ParseAnd;
+    WHILE Valid AND (Tok = 'or') DO BEGIN
+      Next;
+      Right := ParseAnd;
+      Result := Result OR Right;
+    END;
+  END;
+
+BEGIN
+  Valid := True;
+  P := 1;
+  Next;
+  IF Tok = '' THEN
+    Valid := False;                     // nothing to evaluate
+  Result := Valid AND ParseOr;
+  IF Tok <> '' THEN
+    Valid := False;                     // trailing junk, or an operand where an operator should be
+  IF NOT Valid THEN
+    Result := False;
 END;
 
 FUNCTION TCustomWordCodeHighlighter.TokenizeLine(CONST ALine: STRING; ALineIndex: Integer):
@@ -854,6 +1016,23 @@ BEGIN
     Result := IsDefined(Symbol);
 END;
 
+FUNCTION TDelphiCodeHighlighter.EvaluateAt(CONST Expr: STRING;
+  CONST State: TCodeLineState): Boolean;
+VAR
+  Snapshot          : TCodeLineState;
+  Valid             : Boolean;
+BEGIN
+  Snapshot := State;                    // a VAR/CONST parameter can't be captured, a local can
+  Result := EvaluateConditionalExpression(Expr,
+    FUNCTION(CONST Symbol: STRING): Boolean
+    BEGIN
+      Result := IsDefinedAt(Symbol, Snapshot);
+    END, Valid);
+  // A typo in the expression must not hide code: show the branch.
+  IF NOT Valid THEN
+    Result := True;
+END;
+
 FUNCTION TDelphiCodeHighlighter.TryDirective(CONST ALine: STRING; Index: Integer;
   VAR State: TCodeLineState; OUT TokenLength: Integer): Boolean;
 VAR
@@ -896,9 +1075,15 @@ BEGIN
   END ELSE IF Word = 'ifndef' THEN BEGIN
     Active := ParentActive AND NOT IsDefinedAt(Arg, State);
     CondPush(State.Levels, Active, Active OR NOT ParentActive);
-  END ELSE IF Word = 'else' THEN
+  END ELSE IF Word = 'if' THEN BEGIN
+    Active := ParentActive AND EvaluateAt(Arg, State);
+    CondPush(State.Levels, Active, Active OR NOT ParentActive);
+  END ELSE IF (Word = 'elseif') OR (Word = 'elif') THEN
+    // Evaluated only if it could matter: a chain already taken stays taken.
+    CondElseIf(State.Levels, ParentActive OR EvaluateAt(Arg, State))
+  ELSE IF Word = 'else' THEN
     CondElse(State.Levels)
-  ELSE IF Word = 'endif' THEN
+  ELSE IF (Word = 'endif') OR (Word = 'ifend') THEN
     CondPop(State.Levels)
   // {#define} / {#undef} written by the script author take effect from here
   // down - but not when the compiler would skip them.

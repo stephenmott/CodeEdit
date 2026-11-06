@@ -46,8 +46,9 @@ instead, so a highlighter normally doesn't need to care about themes.
 ## Conditional compilation (Delphi highlighter)
 
 `TDelphiCodeHighlighter` understands `{#define X}`, `{#undef X}`,
-`{#ifdef X}`, `{#ifndef X}`, `{#else}` and `{#endif}` and dims whatever the
-compiler would skip. A script can define its own symbols:
+`{#ifdef X}`, `{#ifndef X}`, `{#if expr}`, `{#elseif expr}`, `{#else}` and
+`{#endif}` (or `{#ifend}`) and dims whatever the compiler would skip. A
+script can define its own symbols:
 
 ```pascal
 {#define DEBUG}
@@ -77,6 +78,35 @@ then a `{#undef X}` earlier in the text (which cancels a host define), then
 `Defines` and `OnIsDefined`. A `{#define}` or `{#undef}` inside a branch
 that is compiled out is ignored, as the compiler would.
 
+### `{#if}` expressions and the shared evaluator
+
+`{#if expr}` and `{#elseif expr}` take a boolean expression in Delphi's
+`{$IF}` style:
+
+```
+defined(X)   not   and   or   ( )   true   false
+```
+
+`not` binds tightest, then `and`, then `or`; words are case-insensitive;
+each `defined(X)` is resolved exactly like `{#ifdef X}`. In an `if`/`elseif`
+chain only the first branch whose condition holds is live. `declared()` and
+value comparisons are not supported.
+
+The evaluator is a public function so that a preprocessor can use the same
+one and never disagree with the editor about which branch is live:
+
+```pascal
+function EvaluateConditionalExpression(const Expr: string;
+  const IsDefined: TCodeIsDefinedFunc; out Valid: Boolean): Boolean;
+```
+
+`IsDefined` is a `reference to function(const Symbol: string): Boolean`.
+`Valid` is False for an empty expression, a bare symbol (write
+`defined(X)`), an unbalanced bracket, a missing or dangling operator or C
+operators, and the result is then False. The highlighter treats an invalid
+expression as True so a typo never hides code; a preprocessor should report
+it as an error instead.
+
 Directive tokens are `tkDirective` (purple by default). Everything inside
 an inactive branch, including comments and strings, is reported as
 `tkInactive` (grey, plain face) so it reads as "not compiled", while
@@ -94,7 +124,8 @@ in a table and hands out its index, so equal states compare equal.
 
 To get the same in a custom `TCustomWordCodeHighlighter` subclass, override
 `TryDirective` and work on the `TCodeLineState` it receives with the
-protected `CondPush`, `CondElse`, `CondPop` and `SymbolList*` helpers.
+protected `CondPush`, `CondElseIf`, `CondElse`, `CondPop` and `SymbolList*`
+helpers.
 
 ## Class hierarchy
 
