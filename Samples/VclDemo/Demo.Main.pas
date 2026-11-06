@@ -68,6 +68,11 @@ BEGIN
     '{#else}' + sLineBreak +
     '  { release build: stays quiet }  // dimmed: the compiler skips it' + sLineBreak +
     '{#endif}' + sLineBreak +
+    '{#if defined(DEBUG) and not defined(QUIET)}' + sLineBreak +
+    '  WriteLn(''Run: verbose'');       // expressions: defined(), not, and, or, ( )' + sLineBreak +
+    '{#elseif defined(QUIET)}' + sLineBreak +
+    '  { silenced by QUIET }          // add {#define QUIET} above to swap these' + sLineBreak +
+    '{#endif}' + sLineBreak +
     '  // Start typing here.' + sLineBreak +
     'end;' + sLineBreak +
     '' + sLineBreak +
