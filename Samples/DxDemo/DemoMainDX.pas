@@ -32,6 +32,8 @@ CONST
     '' + sLineBreak +
     'interface' + sLineBreak +
     '' + sLineBreak +
+    '{#define DEBUG}   // conditional compilation: try changing or removing this' + sLineBreak +
+    '' + sLineBreak +
     'type' + sLineBreak +
     '  TExample = class' + sLineBreak +
     '  public' + sLineBreak +
@@ -42,6 +44,11 @@ CONST
     '' + sLineBreak +
     'procedure TExample.Run;' + sLineBreak +
     'begin' + sLineBreak +
+    '{#ifdef DEBUG}' + sLineBreak +
+    '  WriteLn(''Run: debug build'');   // live while DEBUG is defined' + sLineBreak +
+    '{#else}' + sLineBreak +
+    '  { release build: stays quiet }  // dimmed: the compiler skips it' + sLineBreak +
+    '{#endif}' + sLineBreak +
     '  // Start typing here.' + sLineBreak +
     'end;' + sLineBreak +
     '' + sLineBreak +
