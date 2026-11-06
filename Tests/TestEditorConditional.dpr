@@ -70,6 +70,15 @@ begin
     HL.Defines.Text := '';
     Check(KindAt(1, 3) = tkInactive, 'clearing Defines re-tokenizes: ifdef branch inactive again');
 
+    // A {#define} typed into the script itself flows down to the ifdef, and
+    // editing it above re-flows the lines below.
+    Ed.Lines.Insert(0, '{#define DEBUG}');
+    Check(KindAt(2, 3) = tkIdentifier, 'a {#define} in the text makes the branch live');
+    Check(KindAt(4, 3) = tkInactive, 'and the else branch inactive');
+    Ed.Lines[0] := '{#define OTHER}';
+    Check(KindAt(2, 3) = tkInactive, 'editing the define line re-flows the branches below');
+    Ed.Lines.Delete(0);
+
     // Switching the prefix turns the {# lines into ordinary comments.
     HL.ConditionalPrefix := '{$';
     Check(KindAt(0, 1) = tkComment, 'with a {$ prefix the {# line is a comment');

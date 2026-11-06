@@ -77,26 +77,42 @@ TYPE
     Kind: TCodeTokenKind;
   END;
 
+  { What a line of a TCustomWordCodeHighlighter language leaves open for the
+    next line. The editor only sees an Integer: the highlighter interns each
+    distinct record in a table and hands out its index, so equal states get
+    equal numbers (which is all the editor's cache relies on) and 0 stays
+    "nothing open". Conditional-compilation bookkeeping lives here so that a
+    define directive in the text reaches the ifdef directives further down. }
+  TCodeLineState = RECORD
+    Range: Integer;                     // open multi-line range, 1-based registration index, 0 = none
+    Levels: STRING;                     // one char per open conditional branch: '0'..'3' = taken*2 + active
+    Defined: STRING;                    // ';'-separated lower-case symbols defined by the text so far
+    Undefined: STRING;                  // same, undefined by the text (overrides the host's list)
+  END;
+
   TCustomWordCodeHighlighter = CLASS(TCustomCodeHighlighter)
   PRIVATE
     FKeywords: TDictionary<STRING, Boolean>;
     FMultiLineRanges: TList<TCodeMultiLineRange>;
+    FStateKeys: TDictionary<STRING, Integer>;
+    FStates: TList<TCodeLineState>;
+    FUNCTION StateFor(Handle: Integer): TCodeLineState;
+    FUNCTION InternState(CONST State: TCodeLineState): Integer;
   PROTECTED
-    { Conditional compilation. The line state packs the open multi-line range
-      (low 8 bits) with a stack of conditional branches: bits 8..11 hold the
-      depth, then 2 bits per level from bit 12 (bit 0 = this branch is active,
-      bit 1 = a branch of this if/else chain has already been taken). Nine
-      levels are tracked; deeper ones count in the depth but are treated as
-      active. Text is inactive when any stored level is inactive. }
-    CLASS FUNCTION CondDepth(State: Integer): Integer; STATIC;
-    CLASS FUNCTION CondActive(State: Integer): Boolean; STATIC;
-    CLASS PROCEDURE CondPush(VAR State: Integer; Active, Taken: Boolean); STATIC;
-    CLASS PROCEDURE CondElse(VAR State: Integer); STATIC;
-    CLASS PROCEDURE CondPop(VAR State: Integer); STATIC;
-    // A directive at ALine[Index]? Return its length, updating the
-    // conditional part of State (the range bits are kept by the caller).
-    // Default: no directives.
-    FUNCTION TryDirective(CONST ALine: STRING; Index: Integer; VAR State: Integer;
+    { Conditional branches: text is inactive while any open level is inactive.
+      A branch opened inside an inactive one is inactive and counts as taken,
+      so its else stays inactive too. }
+    CLASS FUNCTION CondActive(CONST Levels: STRING): Boolean; STATIC;
+    CLASS PROCEDURE CondPush(VAR Levels: STRING; Active, Taken: Boolean); STATIC;
+    CLASS PROCEDURE CondElse(VAR Levels: STRING); STATIC;
+    CLASS PROCEDURE CondPop(VAR Levels: STRING); STATIC;
+    { The ';'-separated symbol lists in TCodeLineState. }
+    CLASS FUNCTION SymbolListHas(CONST List, Symbol: STRING): Boolean; STATIC;
+    CLASS PROCEDURE SymbolListAdd(VAR List: STRING; CONST Symbol: STRING); STATIC;
+    CLASS PROCEDURE SymbolListRemove(VAR List: STRING; CONST Symbol: STRING); STATIC;
+    // A directive at ALine[Index]? Return its length, updating State's
+    // conditional fields (Range is the caller's). Default: no directives.
+    FUNCTION TryDirective(CONST ALine: STRING; Index: Integer; VAR State: TCodeLineState;
       OUT TokenLength: Integer): Boolean; VIRTUAL;
     PROCEDURE AddKeyword(CONST Value: STRING);
     PROCEDURE AddKeywords(CONST Values: ARRAY OF STRING);
@@ -145,15 +161,18 @@ TYPE
     FUNCTION ReadNumber(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
     FUNCTION ReadString(CONST ALine: STRING; Index: Integer): Integer; OVERRIDE;
     PROCEDURE SetDefaultStyles; OVERRIDE;
-    // {#ifdef X} {#ifndef X} {#else} {#endif} (prefix per ConditionalPrefix,
-    // closing brace on the same line). Any other {#word ...} is coloured as a
-    // directive but changes nothing.
-    FUNCTION TryDirective(CONST ALine: STRING; Index: Integer; VAR State: Integer;
+    // {#define X} {#undef X} {#ifdef X} {#ifndef X} {#else} {#endif} (prefix
+    // per ConditionalPrefix, closing brace on the same line). Any other
+    // {#word ...} is coloured as a directive but changes nothing.
+    FUNCTION TryDirective(CONST ALine: STRING; Index: Integer; VAR State: TCodeLineState;
       OUT TokenLength: Integer): Boolean; OVERRIDE;
+    // The text's own {#define}/{#undef} so far, then Defines, then OnIsDefined.
+    FUNCTION IsDefinedAt(CONST Symbol: STRING; CONST State: TCodeLineState): Boolean; VIRTUAL;
   PUBLIC
     CONSTRUCTOR Create(AOwner: TComponent); OVERRIDE;
     DESTRUCTOR Destroy; OVERRIDE;
-    // Defines, then OnIsDefined. Case-insensitive.
+    // The host's view: Defines, then OnIsDefined. Case-insensitive. Text
+    // directives are layered on top of this per line (IsDefinedAt).
     FUNCTION IsDefined(CONST Symbol: STRING): Boolean; VIRTUAL;
   PUBLISHED
     // Symbols that count as defined for {#ifdef} / {#ifndef}; changing the
@@ -379,15 +398,57 @@ BEGIN
   INHERITED;
   FKeywords := TDictionary<STRING, Boolean>.Create;
   FMultiLineRanges := TList<TCodeMultiLineRange>.Create;
+  FStateKeys := TDictionary<STRING, Integer>.Create;
+  FStates := TList<TCodeLineState>.Create;
   BuildKeywords;
   BuildMultiLineRanges;
 END;
 
 DESTRUCTOR TCustomWordCodeHighlighter.Destroy;
 BEGIN
+  FStates.Free;
+  FStateKeys.Free;
   FMultiLineRanges.Free;
   FKeywords.Free;
   INHERITED;
+END;
+
+{ State interning. Handle 0 is the empty state; others index FStates + 1.
+  The table only grows (editors hold handles for as long as they like) but
+  holds one entry per distinct combination, which stays small in practice. }
+
+FUNCTION StateKey(CONST State: TCodeLineState): STRING;
+BEGIN
+  Result := IntToStr(State.Range) + '|' + State.Levels + '|' + State.Defined + '|' +
+    State.Undefined;
+END;
+
+FUNCTION TCustomWordCodeHighlighter.StateFor(Handle: Integer): TCodeLineState;
+BEGIN
+  IF (Handle >= 1) AND (Handle <= FStates.Count) THEN
+    Result := FStates[Handle - 1]
+  ELSE BEGIN
+    // 0, or a handle from another highlighter: nothing open.
+    Result.Range := 0;
+    Result.Levels := '';
+    Result.Defined := '';
+    Result.Undefined := '';
+  END;
+END;
+
+FUNCTION TCustomWordCodeHighlighter.InternState(CONST State: TCodeLineState): Integer;
+VAR
+  Key               : STRING;
+BEGIN
+  IF (State.Range = 0) AND (State.Levels = '') AND (State.Defined = '') AND
+    (State.Undefined = '') THEN
+    Exit(0);
+  Key := StateKey(State);
+  IF NOT FStateKeys.TryGetValue(Key, Result) THEN BEGIN
+    FStates.Add(State);
+    Result := FStates.Count;
+    FStateKeys.Add(Key, Result);
+  END;
 END;
 
 PROCEDURE TCustomWordCodeHighlighter.AddMultiLineRange(CONST AStartDelimiter, AEndDelimiter: STRING;
@@ -508,90 +569,108 @@ BEGIN
     Result := tkIdentifier;
 END;
 
-{ Conditional state: see the declaration for the layout. }
+{ Conditional branches. Each open level is one character of Levels:
+  '0' inactive, '1' active, '2' inactive but a branch was taken, '3' active
+  and taken. }
 
 CONST
-  CondRangeMask     = $FF;
-  CondDepthShift    = 8;
-  CondDepthMask     = $F;
-  CondLevelShift    = 12;
-  CondStoredLevels  = 9;                // 9 x 2 bits = bits 12..29, clear of the sign bit
   CondActiveBit     = 1;
   CondTakenBit      = 2;
 
-CLASS FUNCTION TCustomWordCodeHighlighter.CondDepth(State: Integer): Integer;
-BEGIN
-  Result := (State SHR CondDepthShift) AND CondDepthMask;
-END;
-
-CLASS FUNCTION TCustomWordCodeHighlighter.CondActive(State: Integer): Boolean;
+CLASS FUNCTION TCustomWordCodeHighlighter.CondActive(CONST Levels: STRING): Boolean;
 VAR
-  Level             : Integer;
+  I                 : Integer;
 BEGIN
-  FOR Level := 0 TO Min(CondDepth(State), CondStoredLevels) - 1 DO
-    IF (State SHR (CondLevelShift + 2 * Level)) AND CondActiveBit = 0 THEN
+  FOR I := 1 TO Length(Levels) DO
+    IF (Ord(Levels[I]) - Ord('0')) AND CondActiveBit = 0 THEN
       Exit(False);
   Result := True;
 END;
 
-CLASS PROCEDURE TCustomWordCodeHighlighter.CondPush(VAR State: Integer; Active, Taken: Boolean);
+CLASS PROCEDURE TCustomWordCodeHighlighter.CondPush(VAR Levels: STRING; Active, Taken: Boolean);
 VAR
-  Depth             : Integer;
   Bits              : Integer;
 BEGIN
-  Depth := CondDepth(State);
-  IF Depth >= CondDepthMask THEN
-    Exit;                               // absurdly deep: stop counting
-  IF Depth < CondStoredLevels THEN BEGIN
-    Bits := 0;
-    IF Active THEN
-      Bits := Bits OR CondActiveBit;
-    IF Taken THEN
-      Bits := Bits OR CondTakenBit;
-    State := (State AND NOT (3 SHL (CondLevelShift + 2 * Depth))) OR
-      (Bits SHL (CondLevelShift + 2 * Depth));
-  END;
-  State := (State AND NOT (CondDepthMask SHL CondDepthShift)) OR ((Depth + 1) SHL CondDepthShift);
+  Bits := 0;
+  IF Active THEN
+    Bits := Bits OR CondActiveBit;
+  IF Taken THEN
+    Bits := Bits OR CondTakenBit;
+  Levels := Levels + Chr(Ord('0') + Bits);
 END;
 
-CLASS PROCEDURE TCustomWordCodeHighlighter.CondElse(VAR State: Integer);
+CLASS PROCEDURE TCustomWordCodeHighlighter.CondElse(VAR Levels: STRING);
 VAR
-  Depth             : Integer;
-  Shift             : Integer;
   Bits              : Integer;
-  ParentActive      : Boolean;
-  Parent            : Integer;
 BEGIN
-  Depth := CondDepth(State);
-  IF (Depth = 0) OR (Depth > CondStoredLevels) THEN
-    Exit;                               // no open branch, or one we don't track
-  Shift := CondLevelShift + 2 * (Depth - 1);
-  Bits := (State SHR Shift) AND 3;
+  IF Levels = '' THEN
+    Exit;                               // stray else
+  Bits := Ord(Levels[Length(Levels)]) - Ord('0');
   // Active iff everything above is active and no branch of this chain was.
-  Parent := State AND NOT (CondDepthMask SHL CondDepthShift) OR ((Depth - 1) SHL CondDepthShift);
-  ParentActive := CondActive(Parent);
-  IF ParentActive AND (Bits AND CondTakenBit = 0) THEN
+  IF CondActive(Copy(Levels, 1, Length(Levels) - 1)) AND (Bits AND CondTakenBit = 0) THEN
     Bits := CondActiveBit OR CondTakenBit
   ELSE
     Bits := CondTakenBit;
-  State := (State AND NOT (3 SHL Shift)) OR (Bits SHL Shift);
+  Levels[Length(Levels)] := Chr(Ord('0') + Bits);
 END;
 
-CLASS PROCEDURE TCustomWordCodeHighlighter.CondPop(VAR State: Integer);
-VAR
-  Depth             : Integer;
+CLASS PROCEDURE TCustomWordCodeHighlighter.CondPop(VAR Levels: STRING);
 BEGIN
-  Depth := CondDepth(State);
-  IF Depth = 0 THEN
-    Exit;                               // stray endif
-  Dec(Depth);
-  IF Depth < CondStoredLevels THEN
-    State := State AND NOT (3 SHL (CondLevelShift + 2 * Depth));
-  State := (State AND NOT (CondDepthMask SHL CondDepthShift)) OR (Depth SHL CondDepthShift);
+  IF Levels <> '' THEN
+    Delete(Levels, Length(Levels), 1);  // a stray endif is ignored
+END;
+
+{ ';'-separated, lower-case, sorted symbol lists. }
+
+CLASS FUNCTION TCustomWordCodeHighlighter.SymbolListHas(CONST List, Symbol: STRING): Boolean;
+BEGIN
+  Result := (Symbol <> '') AND (Pos(';' + LowerCase(Symbol) + ';', ';' + List + ';') > 0);
+END;
+
+CLASS PROCEDURE TCustomWordCodeHighlighter.SymbolListAdd(VAR List: STRING; CONST Symbol: STRING);
+VAR
+  Items             : TStringList;
+BEGIN
+  IF (Symbol = '') OR SymbolListHas(List, Symbol) THEN
+    Exit;
+  // Kept sorted so the order of {#define}s doesn't create distinct states.
+  Items := TStringList.Create;
+  TRY
+    Items.Delimiter := ';';
+    Items.StrictDelimiter := True;
+    Items.DelimitedText := List;
+    Items.Add(LowerCase(Symbol));
+    Items.Sort;
+    List := Items.DelimitedText;
+  FINALLY
+    Items.Free;
+  END;
+END;
+
+CLASS PROCEDURE TCustomWordCodeHighlighter.SymbolListRemove(VAR List: STRING;
+  CONST Symbol: STRING);
+VAR
+  Items             : TStringList;
+  I                 : Integer;
+BEGIN
+  IF NOT SymbolListHas(List, Symbol) THEN
+    Exit;
+  Items := TStringList.Create;
+  TRY
+    Items.Delimiter := ';';
+    Items.StrictDelimiter := True;
+    Items.DelimitedText := List;
+    I := Items.IndexOf(LowerCase(Symbol));
+    IF I >= 0 THEN
+      Items.Delete(I);
+    List := Items.DelimitedText;
+  FINALLY
+    Items.Free;
+  END;
 END;
 
 FUNCTION TCustomWordCodeHighlighter.TryDirective(CONST ALine: STRING; Index: Integer;
-  VAR State: Integer; OUT TokenLength: Integer): Boolean;
+  VAR State: TCodeLineState; OUT TokenLength: Integer): Boolean;
 BEGIN
   TokenLength := 0;
   Result := False;
@@ -615,8 +694,7 @@ VAR
   RangeIndex        : Integer;
   CloseAt           : Integer;
   Range             : TCodeMultiLineRange;
-  Cond              : Integer;          // conditional bits of the state (range bits cleared)
-  RangeState        : Integer;          // open range (1-based index) carried to the next line
+  State             : TCodeLineState;
   DirectiveLength   : Integer;
 
   PROCEDURE AddToken(AStart, ALength: Integer; AKind: TCodeTokenKind);
@@ -625,7 +703,7 @@ VAR
       Exit;
     // Everything inside a compiled-out branch is dimmed, directives and
     // blanks aside, so the reader sees at a glance what the compiler skips.
-    IF (AKind <> tkDirective) AND (AKind <> tkWhitespace) AND NOT CondActive(Cond) THEN
+    IF (AKind <> tkDirective) AND (AKind <> tkWhitespace) AND NOT CondActive(State.Levels) THEN
       AKind := tkInactive;
     Tokens.Add(MakeToken(AStart, ALength, AKind));
   END;
@@ -644,23 +722,21 @@ VAR
   END;
 
 BEGIN
-  // The state carries an open multi-line range in its low byte and the
-  // conditional-compilation stack above it (see CondPush); keep them apart.
-  Cond := StartState AND NOT CondRangeMask;
-  RangeState := 0;
+  State := StateFor(StartState);
+  RangeIndex := State.Range;
+  State.Range := 0;
   Tokens := TList<TCodeToken>.Create;
   TRY
     I := 1;
 
     // A multi-line construct left open by the previous line consumes this line
     // until its end delimiter (or to the end of the line, keeping the state).
-    RangeIndex := StartState AND CondRangeMask;
     IF (RangeIndex >= 1) AND (RangeIndex <= FMultiLineRanges.Count) THEN BEGIN
       Range := FMultiLineRanges[RangeIndex - 1];
       CloseAt := PosEx(Range.EndDelimiter, ALine, 1);
       IF CloseAt = 0 THEN BEGIN
         AddToken(1, Length(ALine), Range.Kind);
-        RangeState := RangeIndex;
+        State.Range := RangeIndex;
         I := Length(ALine) + 1;
       END ELSE BEGIN
         I := CloseAt + Length(Range.EndDelimiter);
@@ -678,7 +754,7 @@ BEGIN
       END ELSE IF IsLineComment(ALine, I) THEN BEGIN
         AddToken(I, Length(ALine) - I + 1, tkComment);
         Break;
-      END ELSE IF TryDirective(ALine, I, Cond, DirectiveLength) THEN BEGIN
+      END ELSE IF TryDirective(ALine, I, State, DirectiveLength) THEN BEGIN
         // Before the ranges: '{#ifdef' would otherwise open a '{' comment.
         AddToken(I, DirectiveLength, tkDirective);
         Inc(I, DirectiveLength);
@@ -688,7 +764,7 @@ BEGIN
         CloseAt := PosEx(Range.EndDelimiter, ALine, I + Length(Range.StartDelimiter));
         IF CloseAt = 0 THEN BEGIN
           AddToken(Start, Length(ALine) - Start + 1, Range.Kind);
-          RangeState := RangeIndex + 1;
+          State.Range := RangeIndex + 1;
           Break;
         END;
         I := CloseAt + Length(Range.EndDelimiter);
@@ -712,7 +788,7 @@ BEGIN
       END;
     END;
 
-    EndState := Cond OR RangeState;
+    EndState := InternState(State);
     Result := Tokens.ToArray;
   FINALLY
     Tokens.Free;
@@ -765,8 +841,21 @@ BEGIN
     FOnIsDefined(Self, Symbol, Result);
 END;
 
+FUNCTION TDelphiCodeHighlighter.IsDefinedAt(CONST Symbol: STRING;
+  CONST State: TCodeLineState): Boolean;
+BEGIN
+  // A {#define} in the text wins over everything; a {#undef} in the text
+  // cancels a host define; otherwise the host decides.
+  IF SymbolListHas(State.Defined, Symbol) THEN
+    Result := True
+  ELSE IF SymbolListHas(State.Undefined, Symbol) THEN
+    Result := False
+  ELSE
+    Result := IsDefined(Symbol);
+END;
+
 FUNCTION TDelphiCodeHighlighter.TryDirective(CONST ALine: STRING; Index: Integer;
-  VAR State: Integer; OUT TokenLength: Integer): Boolean;
+  VAR State: TCodeLineState; OUT TokenLength: Integer): Boolean;
 VAR
   CloseAt           : Integer;
   Body              : STRING;
@@ -800,17 +889,26 @@ BEGIN
 
   // A branch nested inside an inactive one is never active, and counts as
   // "taken" so its else stays inactive too.
-  ParentActive := CondActive(State);
+  ParentActive := CondActive(State.Levels);
   IF Word = 'ifdef' THEN BEGIN
-    Active := ParentActive AND IsDefined(Arg);
-    CondPush(State, Active, Active OR NOT ParentActive);
+    Active := ParentActive AND IsDefinedAt(Arg, State);
+    CondPush(State.Levels, Active, Active OR NOT ParentActive);
   END ELSE IF Word = 'ifndef' THEN BEGIN
-    Active := ParentActive AND NOT IsDefined(Arg);
-    CondPush(State, Active, Active OR NOT ParentActive);
+    Active := ParentActive AND NOT IsDefinedAt(Arg, State);
+    CondPush(State.Levels, Active, Active OR NOT ParentActive);
   END ELSE IF Word = 'else' THEN
-    CondElse(State)
+    CondElse(State.Levels)
   ELSE IF Word = 'endif' THEN
-    CondPop(State);
+    CondPop(State.Levels)
+  // {#define} / {#undef} written by the script author take effect from here
+  // down - but not when the compiler would skip them.
+  ELSE IF (Word = 'define') AND ParentActive AND (Arg <> '') THEN BEGIN
+    SymbolListAdd(State.Defined, Arg);
+    SymbolListRemove(State.Undefined, Arg);
+  END ELSE IF (Word = 'undef') AND ParentActive AND (Arg <> '') THEN BEGIN
+    SymbolListRemove(State.Defined, Arg);
+    SymbolListAdd(State.Undefined, Arg);
+  END;
   // Any other {#...} is still shown as a directive.
 END;
 

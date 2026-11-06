@@ -136,12 +136,40 @@ begin
     Tokens := DL.TokenizeLineState('{#endif} back', S3, S1);
     Check((KindAt(Tokens, 10) = tkIdentifier) and (S1 = 0), 'Cond: endif after the comment restores live code');
 
-    // Unknown directive: coloured, no effect. Unterminated: an ordinary comment.
-    Tokens := DL.TokenizeLineState('{#define FOO} a', 0, S1);
-    Check((KindAt(Tokens, 1) = tkDirective) and (KindAt(Tokens, 15) = tkIdentifier) and (S1 = 0),
-      'Cond: unknown {#define} is a directive with no effect');
+    // {#define} / {#undef} in the text, flowing down through the state.
+    Tokens := DL.TokenizeLineState('{#define FOO}', 0, S1);
+    Check((KindAt(Tokens, 1) = tkDirective) and (S1 <> 0), 'Cond: {#define} is a directive that changes the state');
+    Tokens := DL.TokenizeLineState('{#ifdef foo} a {#endif}', S1, S2);
+    Check(KindAt(Tokens, 14) = tkIdentifier, 'Cond: text define makes ifdef live (case-insensitive)');
+    Check(S2 = S1, 'Cond: a balanced ifdef leaves the define state as it was');
+    Tokens := DL.TokenizeLineState('{#undef FOO} {#ifdef FOO} a {#endif}', S2, S3);
+    Check(KindAt(Tokens, 27) = tkInactive, 'Cond: text undef makes ifdef inactive');
+    Tokens := DL.TokenizeLineState('{#undef DEBUG} {#ifdef DEBUG} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 31) = tkInactive, 'Cond: text undef overrides a host define');
+    Tokens := DL.TokenizeLineState('{#define DEBUG} {#ifdef DEBUG} a {#endif}', S1, S2);
+    Check(KindAt(Tokens, 32) = tkIdentifier, 'Cond: text define restores it');
+    Tokens := DL.TokenizeLineState('{#ifdef RELEASE} {#define SKIPPED} {#endif} {#ifdef SKIPPED} a {#endif}', 0, S1);
+    Check((KindAt(Tokens, 62) = tkInactive) and (S1 = 0), 'Cond: a define inside a dead branch does not count');
+    Tokens := DL.TokenizeLineState('{#define A} {#define B}', 0, S1);
+    Tokens := DL.TokenizeLineState('{#define B} {#define A}', 0, S2);
+    Check(S1 = S2, 'Cond: define order does not create distinct states');
+    Tokens := DL.TokenizeLineState('{#define A}', 0, S1);
+    Tokens := DL.TokenizeLineState('{#define A}', S1, S2);
+    Check(S1 = S2, 'Cond: redefining is idempotent');
     Tokens := DL.TokenizeLineState('{#ifdef DEBUG', 0, S1);
     Check((KindAt(Tokens, 1) = tkComment) and (S1 <> 0), 'Cond: unterminated directive is a comment');
+
+    // Deep nesting is unlimited now that the state is a table entry.
+    S1 := 0;
+    for S2 := 1 to 20 do
+      Tokens := DL.TokenizeLineState('{#ifdef DEBUG}', S1, S1);
+    Tokens := DL.TokenizeLineState('deep', S1, S2);
+    Check(KindAt(Tokens, 1) = tkIdentifier, 'Cond: 20 live levels deep still live');
+    Tokens := DL.TokenizeLineState('{#ifdef NOPE} x', S2, S3);
+    Check(KindAt(Tokens, 15) = tkInactive, 'Cond: 21st level inactive');
+    for S2 := 1 to 21 do
+      Tokens := DL.TokenizeLineState('{#endif}', S3, S3);
+    Check(S3 = 0, 'Cond: 21 endifs return to state 0');
 
     // Stray else/endif are harmless; the event can override the list.
     Tokens := DL.TokenizeLineState('{#endif} {#else} a', 0, S1);

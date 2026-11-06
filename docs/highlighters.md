@@ -45,32 +45,56 @@ instead, so a highlighter normally doesn't need to care about themes.
 
 ## Conditional compilation (Delphi highlighter)
 
-`TDelphiCodeHighlighter` understands `{#ifdef X}`, `{#ifndef X}`, `{#else}`
-and `{#endif}` and dims whatever the compiler would skip:
+`TDelphiCodeHighlighter` understands `{#define X}`, `{#undef X}`,
+`{#ifdef X}`, `{#ifndef X}`, `{#else}` and `{#endif}` and dims whatever the
+compiler would skip. A script can define its own symbols:
 
 ```pascal
-DelphiCodeHighlighter1.Defines.Add('DEBUG');   // symbols that count as defined
+{#define DEBUG}
+...
+{#ifdef DEBUG}
+  Log('verbose');      // live
+{#else}
+  Quiet;               // dimmed
+{#endif}
+```
+
+and the host can seed symbols the script doesn't declare:
+
+```pascal
+DelphiCodeHighlighter1.Defines.Add('SERVER');       // symbols that count as defined
 DelphiCodeHighlighter1.ConditionalPrefix := '{$';   // for real Delphi sources; '{#' by default
 ```
 
 | Member | Meaning |
 |---|---|
-| `Defines: TStrings` | Symbols considered defined (case-insensitive). Changing the list re-highlights every editor using the highlighter; the text itself is untouched. |
+| `Defines: TStrings` | Symbols the host considers defined (case-insensitive). Changing the list re-highlights every editor using the highlighter; the text itself is untouched. |
 | `ConditionalPrefix` | How a directive starts. `{#` by default (the script dialect); set `{$` for Delphi itself. The closing `}` must be on the same line, otherwise the text is an ordinary comment. |
 | `OnIsDefined(Sender, Symbol, var Defined)` | Called after the list lookup, to decide dynamically. |
+
+Resolution order for `{#ifdef X}`: a `{#define X}` earlier in the text wins,
+then a `{#undef X}` earlier in the text (which cancels a host define), then
+`Defines` and `OnIsDefined`. A `{#define}` or `{#undef}` inside a branch
+that is compiled out is ignored, as the compiler would.
 
 Directive tokens are `tkDirective` (purple by default). Everything inside
 an inactive branch, including comments and strings, is reported as
 `tkInactive` (grey, plain face) so it reads as "not compiled", while
-blanks stay `tkWhitespace`. Branches nest; a branch inside an inactive one
-is inactive whatever its symbol, and so is its `else`. Any other `{#word}`
-is coloured as a directive but has no effect. The nesting is carried in the
-line state next to the open-comment state (nine levels tracked), so the
-dimming survives across lines and edits like block comments do.
+blanks stay `tkWhitespace`. Branches nest without limit; a branch inside an
+inactive one is inactive whatever its symbol, and so is its `else`. Any
+other `{#word}` is coloured as a directive but has no effect; a stray
+`{#else}` or `{#endif}` is ignored.
+
+The open comment, the branch stack and the symbols defined or undefined so
+far all travel in the line state, so the dimming survives across lines and
+edits like block comments do, and a `{#define}` added near the top re-flows
+every `{#ifdef}` below it. The editor still only sees an integer per line:
+`TCustomWordCodeHighlighter` interns each distinct `TCodeLineState` record
+in a table and hands out its index, so equal states compare equal.
 
 To get the same in a custom `TCustomWordCodeHighlighter` subclass, override
-`TryDirective` and drive the state with the protected `CondPush`,
-`CondElse` and `CondPop` helpers.
+`TryDirective` and work on the `TCodeLineState` it receives with the
+protected `CondPush`, `CondElse`, `CondPop` and `SymbolList*` helpers.
 
 ## Class hierarchy
 
