@@ -27,6 +27,26 @@ begin
       Exit(T.Kind);
 end;
 
+type
+  // Method-pointer targets for the listener and the define event.
+  TChangeCounter = class
+    class procedure Bump(Sender: TObject);
+    class procedure SayDefined(Sender: TObject; const Symbol: string; var Defined: Boolean);
+  end;
+
+var
+  ChangeCount: Integer = 0;
+
+class procedure TChangeCounter.Bump(Sender: TObject);
+begin
+  Inc(ChangeCount);
+end;
+
+class procedure TChangeCounter.SayDefined(Sender: TObject; const Symbol: string; var Defined: Boolean);
+begin
+  Defined := True;
+end;
+
 var
   DL: TDelphiCodeHighlighter;
   PY: TPythonCodeHighlighter;
@@ -56,6 +76,92 @@ begin
     Check(S1 <> 0, 'Delphi: (* opens state');
     Tokens := DL.TokenizeLineState('end *) begin', S1, S2);
     Check((S2 = 0) and (KindAt(Tokens, 8) = tkKeyword), 'Delphi: *) closes, begin is keyword');
+  finally
+    DL.Free;
+  end;
+
+  // Conditional compilation: {#ifdef X} .. {#else} .. {#endif} with Defines.
+  DL := TDelphiCodeHighlighter.Create(nil);
+  try
+    DL.AddChangeListener(TChangeCounter.Bump);
+    ChangeCount := 0;
+    DL.Defines.Add('DEBUG');
+    Check(ChangeCount = 1, 'Cond: adding a define notifies listeners');
+
+    Tokens := DL.TokenizeLineState('{#ifdef DEBUG}', 0, S1);
+    Check(KindAt(Tokens, 1) = tkDirective, 'Cond: {#ifdef} is a directive');
+    Check(S1 <> 0, 'Cond: ifdef leaves a non-zero state');
+    Tokens := DL.TokenizeLineState('x := 1;', S1, S2);
+    Check(KindAt(Tokens, 1) = tkIdentifier, 'Cond: defined branch is live code');
+    Tokens := DL.TokenizeLineState('{#else}', S2, S2);
+    Tokens := DL.TokenizeLineState('y := 2; // c', S2, S3);
+    Check(KindAt(Tokens, 1) = tkInactive, 'Cond: else branch of a defined symbol is inactive');
+    Check(KindAt(Tokens, 9) = tkInactive, 'Cond: comment in an inactive branch is inactive too');
+    Check(KindAt(Tokens, 2) = tkWhitespace, 'Cond: blanks stay whitespace');
+    Tokens := DL.TokenizeLineState('{#endif}', S3, S1);
+    Check(S1 = 0, 'Cond: endif returns to state 0');
+    Tokens := DL.TokenizeLineState('z := 3;', S1, S2);
+    Check((KindAt(Tokens, 1) = tkIdentifier) and (S2 = 0), 'Cond: code after endif is live');
+
+    Tokens := DL.TokenizeLineState('{#ifdef RELEASE} a {#else} b {#endif} c', 0, S1);
+    Check(KindAt(Tokens, 18) = tkInactive, 'Cond: same-line undefined branch inactive (a)');
+    Check(KindAt(Tokens, 28) = tkIdentifier, 'Cond: same-line else branch live (b)');
+    Check(KindAt(Tokens, 39) = tkIdentifier, 'Cond: after endif live (c)');
+    Check(S1 = 0, 'Cond: balanced line ends in state 0');
+
+    Tokens := DL.TokenizeLineState('{#ifndef DEBUG} a {#else} b {#endif}', 0, S1);
+    Check((KindAt(Tokens, 17) = tkInactive) and (KindAt(Tokens, 27) = tkIdentifier),
+      'Cond: ifndef of a defined symbol');
+
+    // Nested: inside an inactive branch everything is inactive, even a
+    // branch whose symbol is defined; the else of that inner branch too.
+    Tokens := DL.TokenizeLineState('{#ifdef RELEASE} {#ifdef DEBUG} q {#else} r {#endif} s {#endif} t', 0, S1);
+    Check(KindAt(Tokens, 33) = tkInactive, 'Cond: nested defined branch inside inactive is inactive (q)');
+    Check(KindAt(Tokens, 43) = tkInactive, 'Cond: nested else inside inactive is inactive (r)');
+    Check(KindAt(Tokens, 54) = tkInactive, 'Cond: outer branch still inactive after inner endif (s)');
+    Check((KindAt(Tokens, 65) = tkIdentifier) and (S1 = 0), 'Cond: live again after outer endif (t)');
+
+    // Nested the other way: live outer, undefined inner.
+    Tokens := DL.TokenizeLineState('{#ifdef DEBUG} {#ifdef RELEASE} q {#else} r {#endif} s {#endif}', 0, S1);
+    Check((KindAt(Tokens, 33) = tkInactive) and (KindAt(Tokens, 43) = tkIdentifier) and
+      (KindAt(Tokens, 54) = tkIdentifier), 'Cond: live outer, undefined inner: q off, r and s on');
+
+    // A comment spanning lines inside an inactive branch stays inactive and
+    // the comment state survives alongside the conditional state.
+    Tokens := DL.TokenizeLineState('{#ifdef RELEASE}', 0, S1);
+    Tokens := DL.TokenizeLineState('{ open comment', S1, S2);
+    Check((KindAt(Tokens, 3) = tkInactive) and (S2 <> S1), 'Cond: open comment in inactive branch');
+    Tokens := DL.TokenizeLineState('still } code', S2, S3);
+    Check((KindAt(Tokens, 2) = tkInactive) and (KindAt(Tokens, 9) = tkInactive), 'Cond: comment closes, still inactive');
+    Tokens := DL.TokenizeLineState('{#endif} back', S3, S1);
+    Check((KindAt(Tokens, 10) = tkIdentifier) and (S1 = 0), 'Cond: endif after the comment restores live code');
+
+    // Unknown directive: coloured, no effect. Unterminated: an ordinary comment.
+    Tokens := DL.TokenizeLineState('{#define FOO} a', 0, S1);
+    Check((KindAt(Tokens, 1) = tkDirective) and (KindAt(Tokens, 15) = tkIdentifier) and (S1 = 0),
+      'Cond: unknown {#define} is a directive with no effect');
+    Tokens := DL.TokenizeLineState('{#ifdef DEBUG', 0, S1);
+    Check((KindAt(Tokens, 1) = tkComment) and (S1 <> 0), 'Cond: unterminated directive is a comment');
+
+    // Stray else/endif are harmless; the event can override the list.
+    Tokens := DL.TokenizeLineState('{#endif} {#else} a', 0, S1);
+    Check((KindAt(Tokens, 18) = tkIdentifier) and (S1 = 0), 'Cond: stray endif/else ignored');
+    DL.OnIsDefined := TChangeCounter.SayDefined;
+    Tokens := DL.TokenizeLineState('{#ifdef ANYTHING} a {#endif}', 0, S1);
+    Check(KindAt(Tokens, 19) = tkIdentifier, 'Cond: OnIsDefined can define a symbol');
+    DL.OnIsDefined := nil;
+
+    // '{$' prefix for real Delphi sources.
+    DL.ConditionalPrefix := '{$';
+    Check(ChangeCount = 2, 'Cond: changing the prefix notifies listeners');
+    Tokens := DL.TokenizeLineState('{$ifdef DEBUG} a {$else} b {$endif}', 0, S1);
+    Check((KindAt(Tokens, 1) = tkDirective) and (KindAt(Tokens, 16) = tkIdentifier) and
+      (KindAt(Tokens, 26) = tkInactive), 'Cond: {$ prefix');
+    Tokens := DL.TokenizeLineState('{#ifdef DEBUG} a', 0, S1);
+    Check((KindAt(Tokens, 1) = tkComment) and (S1 = 0), 'Cond: {# is a plain comment once the prefix is {$');
+    DL.RemoveChangeListener(TChangeCounter.Bump);
+    DL.Defines.Clear;
+    Check(ChangeCount = 2, 'Cond: removed listener is not called');
   finally
     DL.Free;
   end;

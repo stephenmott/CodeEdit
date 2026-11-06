@@ -398,6 +398,7 @@ TYPE
     PROCEDURE OptionsChanged(Sender: TObject);
     PROCEDURE ThemeChanged(Sender: TObject);
     PROCEDURE SetHighlighter(Value: TCustomCodeHighlighter);
+    PROCEDURE HighlighterChanged(Sender: TObject);
     PROCEDURE SetCompletionProvider(Value: TCustomCodeCompletionProvider);
     PROCEDURE SetLines(Value: TStrings);
     PROCEDURE SetOptions(Value: TCodeEditorOptions);
@@ -1382,6 +1383,8 @@ BEGIN
   // Cancel rather than finish: committing would touch FBreakpoints/FLineMarkers,
   // and there is no point keeping an undo entry during destruction.
   CancelUndoGroup;
+  IF Assigned(FHighlighter) THEN
+    FHighlighter.RemoveChangeListener(HighlighterChanged);   // it may outlive us
   HideCompletion;
   HideSignatureHelp;
   HideTemplates;
@@ -2641,6 +2644,20 @@ BEGIN
         Result.Foreground := $00D4D4D4
       ELSE
         Result.Foreground := $00606060;
+    tkDirective:
+      IF Dark THEN
+        Result.Foreground := $00C086C5
+      ELSE
+        Result.Foreground := $00DB00AF;
+    tkInactive:
+      // Compiled-out code: dimmed well below the comment colour, plain face.
+      BEGIN
+        IF Dark THEN
+          Result.Foreground := $00707070
+        ELSE
+          Result.Foreground := $00A8A8A8;
+        Result.FontStyle := [];
+      END;
   END;
 END;
 
@@ -4511,14 +4528,25 @@ END;
 PROCEDURE TCodeEditor.SetHighlighter(Value: TCustomCodeHighlighter);
 BEGIN
   IF FHighlighter <> Value THEN BEGIN
-    FHighlighter := Value;
-    FLineTokenCache.Clear;
-    FStateChainValid := 0;
     IF Assigned(FHighlighter) THEN
+      FHighlighter.RemoveChangeListener(HighlighterChanged);
+    FHighlighter := Value;
+    IF Assigned(FHighlighter) THEN BEGIN
       FHighlighter.FreeNotification(Self);
-    InvalidateMinimapCache;
-    Invalidate;
+      FHighlighter.AddChangeListener(HighlighterChanged);
+    END;
+    HighlighterChanged(FHighlighter);
   END;
+END;
+
+// The highlighter tokenizes differently now (its Defines changed, say) even
+// though the text didn't: drop every cached token line and repaint.
+PROCEDURE TCodeEditor.HighlighterChanged(Sender: TObject);
+BEGIN
+  FLineTokenCache.Clear;
+  FStateChainValid := 0;
+  InvalidateMinimapCache;
+  Invalidate;
 END;
 
 PROCEDURE TCodeEditor.SetCompletionProvider(Value: TCustomCodeCompletionProvider);
@@ -4546,7 +4574,9 @@ BEGIN
   INHERITED;
   IF Operation = opRemove THEN BEGIN
     IF AComponent = FHighlighter THEN BEGIN
-      FHighlighter := NIL;
+      FHighlighter := NIL;              // its listener list dies with it
+      FLineTokenCache.Clear;
+      FStateChainValid := 0;
       Invalidate;
     END;
     IF AComponent = FCompletionProvider THEN BEGIN

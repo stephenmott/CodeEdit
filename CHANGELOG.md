@@ -6,6 +6,16 @@ All notable changes to CodeEdit are recorded here. The format loosely follows
 ## Unreleased
 
 ### Added
+- Conditional compilation in `TDelphiCodeHighlighter`: `{#ifdef X}`,
+  `{#ifndef X}`, `{#else}` and `{#endif}` are recognised (prefix per the new
+  `ConditionalPrefix` property, `{#` by default, `{$` for Delphi itself),
+  drawn in a new `tkDirective` colour, and everything in a branch that is
+  compiled out is reported as the new `tkInactive` kind and drawn dimmed.
+  Which symbols are defined comes from the new `Defines` list and the
+  `OnIsDefined` event; changing them re-highlights attached editors through
+  the new highlighter change notification (`AddChangeListener` /
+  `RemoveChangeListener`, protected `Changed`). Branches nest and the state
+  survives across lines alongside block comments.
 - `TCodeEditorSettings` (new `CodeEdit.Settings` unit, on the palette): user
   preferences for one editor persisted under `HKEY_CURRENT_USER\<RegistryPath>`
   (`LoadSettings` / `SaveSettings` / `SettingsExist` / `DeleteSettings`), an

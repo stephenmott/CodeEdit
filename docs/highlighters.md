@@ -30,14 +30,47 @@ matching `}` appears.
 
 ```pascal
 TCodeTokenKind = (tkText, tkWhitespace, tkComment, tkString, tkNumber,
-  tkKeyword, tkIdentifier, tkSymbol);
+  tkKeyword, tkIdentifier, tkSymbol, tkDirective, tkInactive);
 ```
+
+`tkDirective` is a conditional-compilation directive and `tkInactive` is
+code inside a branch that is compiled out (see below); the other kinds are
+what their names say.
 
 Per-kind colors come from the highlighter's `Styles[Kind]` property
 (`TCodeTextStyle`: `Foreground`, `Background`, `FontStyle`). When the
 editor's `Options.ThemeSyntaxColors` is `True` (the default), the editor
 substitutes theme-appropriate dark/light palettes for the token foregrounds
 instead, so a highlighter normally doesn't need to care about themes.
+
+## Conditional compilation (Delphi highlighter)
+
+`TDelphiCodeHighlighter` understands `{#ifdef X}`, `{#ifndef X}`, `{#else}`
+and `{#endif}` and dims whatever the compiler would skip:
+
+```pascal
+DelphiCodeHighlighter1.Defines.Add('DEBUG');   // symbols that count as defined
+DelphiCodeHighlighter1.ConditionalPrefix := '{$';   // for real Delphi sources; '{#' by default
+```
+
+| Member | Meaning |
+|---|---|
+| `Defines: TStrings` | Symbols considered defined (case-insensitive). Changing the list re-highlights every editor using the highlighter; the text itself is untouched. |
+| `ConditionalPrefix` | How a directive starts. `{#` by default (the script dialect); set `{$` for Delphi itself. The closing `}` must be on the same line, otherwise the text is an ordinary comment. |
+| `OnIsDefined(Sender, Symbol, var Defined)` | Called after the list lookup, to decide dynamically. |
+
+Directive tokens are `tkDirective` (purple by default). Everything inside
+an inactive branch, including comments and strings, is reported as
+`tkInactive` (grey, plain face) so it reads as "not compiled", while
+blanks stay `tkWhitespace`. Branches nest; a branch inside an inactive one
+is inactive whatever its symbol, and so is its `else`. Any other `{#word}`
+is coloured as a directive but has no effect. The nesting is carried in the
+line state next to the open-comment state (nine levels tracked), so the
+dimming survives across lines and edits like block comments do.
+
+To get the same in a custom `TCustomWordCodeHighlighter` subclass, override
+`TryDirective` and drive the state with the protected `CondPush`,
+`CondElse` and `CondPop` helpers.
 
 ## Class hierarchy
 
@@ -62,6 +95,12 @@ the end of the line, and must resume that construct when it later receives
 the same value as `StartState`. The values are opaque to the editor — it
 only stores and compares them. The editor maintains the chain lazily and
 re-tokenizes only lines whose text or incoming state changed.
+
+**Change notification**: a highlighter whose output can change without the
+text changing (the Delphi one when its `Defines` change) calls the
+protected `Changed`; editors attach through `AddChangeListener` and drop
+their cached tokens. Custom highlighters with similar settings should do
+the same.
 
 **Language name**: a `class function LanguageName: string` returns a
 human-readable identifier for the language (`'Delphi'`, `'SQL'`, …), used to
